@@ -1,0 +1,28 @@
+version: 2
+
+builds:
+  - env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/tomfevang/go-seed-my-db/internal/version.version={{.Version}}
+      - -X github.com/tomfevang/go-seed-my-db/internal/version.commit={{.Commit}}
+      - -X github.com/tomfevang/go-seed-my-db/internal/version.date={{.Date}}
+
+archives:
+  - format_overrides:
+      - goos: windows
+        format: zip
+
+changelog:
+  disable: true
+
+release:
+  mode: append

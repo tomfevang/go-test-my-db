@@ -1,0 +1,19 @@
+tables:
+  reconciliationentry:
+    columns:
+      details: |-
+        {
+          "accountId": {{Number 1 10000}},
+          "displayName": "{{Name}}",
+          "balanceIn": {{Price 100 100000}},
+          "balanceChange": {{Price 1 10000}},
+          "balanceOut": {{Price 100 100000}},
+          "documentedBalance": {{Price 100 100000}},
+          "status": "{{RandomString (SliceString "NOT_RECONCILED" "RECONCILED" "REJECTED" "CONTROLLED" "IGNORED")}}",
+          "reconciledByEmployeeId": {{Number 0 500}},
+          "reconciledAt": null,
+          "controlledByEmployeeId": {{Number 0 500}},
+          "controlledAt": null,
+          "errors": [],
+          "attachedVouchers": []
+        }
