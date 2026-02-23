@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"math/rand/v2"
 	"os"
 	"strings"
 	"sync"
@@ -57,6 +58,7 @@ type Config struct {
 	Clear        bool
 	LoadData     bool
 	GenConfig    *config.Config
+	FKSampleSize int // max FK values to cache per column; 0 = unlimited
 }
 
 // SeedAll seeds all tables in the configured order.
@@ -81,8 +83,9 @@ func SeedAll(cfg Config) error {
 	}
 
 	fkCache := make(map[string][]any) // "table.column" -> values
+	lastConsumer := computeLastConsumers(cfg.Tables)
 
-	for _, table := range cfg.Tables {
+	for i, table := range cfg.Tables {
 		targetRows := cfg.RowsPerTable[table.Name]
 		if targetRows <= 0 {
 			targetRows = 1000
@@ -104,7 +107,7 @@ func SeedAll(cfg Config) error {
 				// Still cache PKs for downstream FK references.
 				for _, col := range table.Columns {
 					if col.IsPrimaryKey {
-						vals, err := fetchColumnValues(cfg.DB, table.Name, col.Name)
+						vals, err := fetchColumnValues(cfg.DB, table.Name, col.Name, cfg.FKSampleSize)
 						if err != nil {
 							return fmt.Errorf("caching PK values for %s.%s: %w", table.Name, col.Name, err)
 						}
@@ -126,7 +129,7 @@ func SeedAll(cfg Config) error {
 			if vals, ok := fkCache[cacheKey]; ok {
 				tableFKValues[col.Name] = vals
 			} else {
-				vals, err := fetchColumnValues(cfg.DB, col.FK.ReferencedTable, col.FK.ReferencedColumn)
+				vals, err := fetchColumnValues(cfg.DB, col.FK.ReferencedTable, col.FK.ReferencedColumn, cfg.FKSampleSize)
 				if err != nil {
 					return fmt.Errorf("fetching FK values for %s.%s: %w", table.Name, col.Name, err)
 				}
@@ -155,11 +158,18 @@ func SeedAll(cfg Config) error {
 		// Cache this table's primary key values for downstream FK references.
 		for _, col := range table.Columns {
 			if col.IsPrimaryKey {
-				vals, err := fetchColumnValues(cfg.DB, table.Name, col.Name)
+				vals, err := fetchColumnValues(cfg.DB, table.Name, col.Name, cfg.FKSampleSize)
 				if err != nil {
 					return fmt.Errorf("caching PK values for %s.%s: %w", table.Name, col.Name, err)
 				}
 				fkCache[table.Name+"."+col.Name] = vals
+			}
+		}
+
+		// Evict FK cache entries whose last consumer is the current table.
+		for key, lastIdx := range lastConsumer {
+			if lastIdx == i {
+				delete(fkCache, key)
 			}
 		}
 	}
@@ -313,7 +323,7 @@ func fetchMaxPK(db *sql.DB, table, column string) (int64, error) {
 	return maxVal.Int64, nil
 }
 
-func fetchColumnValues(db *sql.DB, table, column string) ([]any, error) {
+func fetchColumnValues(db *sql.DB, table, column string, maxSample int) ([]any, error) {
 	rows, err := db.Query(fmt.Sprintf("SELECT `%s` FROM `%s`", column, table))
 	if err != nil {
 		return nil, err
@@ -328,7 +338,45 @@ func fetchColumnValues(db *sql.DB, table, column string) ([]any, error) {
 		}
 		values = append(values, v)
 	}
-	return values, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return reservoirSample(values, maxSample), nil
+}
+
+// reservoirSample returns a random subset of at most maxSample items using
+// Algorithm R. When maxSample <= 0 or len(values) <= maxSample, all values
+// are returned unchanged.
+func reservoirSample(values []any, maxSample int) []any {
+	if maxSample <= 0 || len(values) <= maxSample {
+		return values
+	}
+	reservoir := make([]any, maxSample)
+	copy(reservoir, values[:maxSample])
+	for i := maxSample; i < len(values); i++ {
+		j := rand.IntN(i + 1)
+		if j < maxSample {
+			reservoir[j] = values[i]
+		}
+	}
+	return reservoir
+}
+
+// computeLastConsumers maps each FK cache key ("table.column") to the index
+// of the last table in the seeding order that references it. This lets SeedAll
+// evict cache entries as soon as they are no longer needed.
+func computeLastConsumers(tables []*introspect.Table) map[string]int {
+	last := make(map[string]int)
+	for i, table := range tables {
+		for _, col := range table.Columns {
+			if col.FK == nil {
+				continue
+			}
+			key := col.FK.ReferencedTable + "." + col.FK.ReferencedColumn
+			last[key] = i
+		}
+	}
+	return last
 }
 
 // fetchExistingUniques loads existing values for single-column unique indexes and
@@ -341,7 +389,7 @@ func fetchExistingUniques(db *sql.DB, table *introspect.Table) (map[string][]any
 		if !col.IsUnique || col.IsPrimaryKey || col.IsAutoInc {
 			continue
 		}
-		vals, err := fetchColumnValues(db, table.Name, col.Name)
+		vals, err := fetchColumnValues(db, table.Name, col.Name, 0)
 		if err != nil {
 			return nil, nil, err
 		}

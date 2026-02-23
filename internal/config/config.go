@@ -49,6 +49,7 @@ type Options struct {
 	ChildrenPerParent ChildrenPerParent `yaml:"children_per_parent"`
 	MaxRows           int              `yaml:"max_rows"`
 	LoadData          bool             `yaml:"load_data"`
+	FKSampleSize      int              `yaml:"fk_sample_size"`
 }
 
 type Config struct {

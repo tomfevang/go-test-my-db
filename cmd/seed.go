@@ -28,8 +28,9 @@ var (
 	configPath  string
 	minChildren int
 	maxChildren int
-	maxRows     int
-	dryRun      bool
+	maxRows      int
+	dryRun       bool
+	fkSampleSize int
 )
 
 var rootCmd = &cobra.Command{
@@ -54,6 +55,7 @@ func init() {
 	rootCmd.Flags().IntVar(&maxChildren, "max-children", 100, "Max children per parent row for child tables")
 	rootCmd.Flags().IntVar(&maxRows, "max-rows", 10_000_000, "Maximum rows per table (safeguard for deep hierarchies)")
 	rootCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show what would be seeded without inserting any data")
+	rootCmd.Flags().IntVar(&fkSampleSize, "fk-sample-size", 500_000, "Max FK parent values to cache per column (0 = unlimited)")
 }
 
 func Execute() error {
@@ -77,6 +79,7 @@ func runSeed(cmd *cobra.Command, args []string) error {
 	minChildren = resolveInt(cmd, "min-children", minChildren, cfg.Options.ChildrenPerParent.Min, 10)
 	maxChildren = resolveInt(cmd, "max-children", maxChildren, cfg.Options.ChildrenPerParent.Max, 100)
 	maxRows = resolveInt(cmd, "max-rows", maxRows, cfg.Options.MaxRows, 10_000_000)
+	fkSampleSize = resolveInt(cmd, "fk-sample-size", fkSampleSize, cfg.Options.FKSampleSize, 500_000)
 	if !cmd.Flags().Changed("load-data") && cfg.Options.LoadData {
 		loadData = true
 	}
@@ -203,6 +206,7 @@ func runSeed(cmd *cobra.Command, args []string) error {
 		Clear:        clear,
 		LoadData:     loadData,
 		GenConfig:    cfg,
+		FKSampleSize: fkSampleSize,
 	}); err != nil {
 		return err
 	}
