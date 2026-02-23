@@ -60,14 +60,14 @@ func (rg *RowGenerator) applyCorrelationGroup(group config.CorrelationGroup, col
 
 	// Build the group generator function based on source type
 	var generateGroup func()
-	switch {
-	case group.Source == "address":
+	switch group.Source {
+	case "address":
 		generateGroup = rg.buildAddressGroup(state, group.Columns)
-	case group.Source == "person":
+	case "person":
 		generateGroup = rg.buildPersonGroup(state, group.Columns)
-	case group.Source == "latlong":
+	case "latlong":
 		generateGroup = rg.buildLatLongGroup(state, group.Columns)
-	case group.Source == "template":
+	case "template":
 		generateGroup = rg.buildTemplateGroup(state, group)
 	default:
 		panic(fmt.Sprintf("correlation: unknown source %q", group.Source))

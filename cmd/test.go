@@ -387,14 +387,6 @@ func avg(timings []time.Duration) time.Duration {
 	return sum / time.Duration(len(timings))
 }
 
-func total(timings []time.Duration) time.Duration {
-	var sum time.Duration
-	for _, t := range timings {
-		sum += t
-	}
-	return sum
-}
-
 func min(timings []time.Duration) time.Duration {
 	if len(timings) == 0 {
 		return 0

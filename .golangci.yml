@@ -7,3 +7,15 @@ linters:
     - staticcheck
     - unused
     - ineffassign
+
+linters-settings:
+  errcheck:
+    exclude-functions:
+      - (io.Closer).Close
+      - (*database/sql.DB).Close
+      - (*database/sql.Rows).Close
+      - fmt.Fprintf
+      - fmt.Fprintln
+      - (*text/tabwriter.Writer).Flush
+      - (*io.PipeWriter).Close
+      - (*database/sql.DB).Exec
