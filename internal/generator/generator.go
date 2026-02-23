@@ -16,6 +16,102 @@ import (
 	"github.com/tomfevang/go-seed-my-db/internal/introspect"
 )
 
+// NameBasedLabel returns a human-readable label for the name-based heuristic
+// that would be applied to the given column, or "" if no heuristic matches.
+func NameBasedLabel(col introspect.Column) string {
+	name := strings.ToLower(col.Name)
+	str := isStringType(col.DataType)
+	num := isNumericType(col.DataType)
+	date := isDateType(col.DataType)
+
+	switch {
+	case str && name == "uuid":
+		return "UUID()"
+	case str && (name == "email" || strings.HasSuffix(name, "_email")):
+		return "Email()"
+	case str && (strings.Contains(name, "first_name") || strings.Contains(name, "firstname")):
+		return "FirstName()"
+	case str && (strings.Contains(name, "last_name") || strings.Contains(name, "lastname")):
+		return "LastName()"
+	case str && (name == "name" || strings.HasSuffix(name, "_name") || strings.HasPrefix(name, "name_")):
+		return "Name()"
+	case str && strings.Contains(name, "phone"):
+		return "Phone()"
+	case str && (strings.Contains(name, "username") || name == "login"):
+		return "Username()"
+	case str && strings.Contains(name, "password"):
+		return "Password()"
+	case str && (name == "address" || name == "street" || strings.Contains(name, "address_line") || strings.Contains(name, "street_address")):
+		return "Street()"
+	case str && name == "city":
+		return "City()"
+	case str && (name == "state" || name == "province"):
+		return "State()"
+	case str && (strings.Contains(name, "zip") || strings.Contains(name, "postal")):
+		return "Zip()"
+	case str && (name == "country" || name == "country_code"):
+		return "Country()"
+	case str && (strings.Contains(name, "url") || strings.Contains(name, "website") || strings.Contains(name, "homepage")):
+		return "URL()"
+	case str && (name == "ip" || strings.Contains(name, "ip_address") || name == "ip_addr"):
+		return "IPv4Address()"
+	case str && (strings.Contains(name, "company") || name == "organization" || name == "org"):
+		return "Company()"
+	case str && (name == "title" || name == "job_title"):
+		return "JobTitle()"
+	case str && (name == "description" || name == "bio" || name == "summary" || name == "about"):
+		return "Sentence(10)"
+	case date && (strings.Contains(name, "created_at") || strings.Contains(name, "updated_at") || strings.Contains(name, "deleted_at")):
+		return "DateRange(2020-2025)"
+	case date && (name == "date_of_birth" || name == "dob" || name == "birthday" || name == "birthdate"):
+		return "DateRange(1950-2005)"
+	case num && (strings.Contains(name, "price") || strings.Contains(name, "amount") || strings.Contains(name, "cost") || name == "total" || name == "subtotal"):
+		return "Price(1, 1000)"
+	case num && (name == "latitude" || name == "lat"):
+		return "Latitude()"
+	case num && (name == "longitude" || name == "lng" || name == "lon"):
+		return "Longitude()"
+	case str && (name == "currency" || name == "currency_code"):
+		return "CurrencyShort()"
+	case str && (name == "color" || name == "colour"):
+		return "Color()"
+	case str && (name == "avatar" || name == "image_url" || name == "photo_url"):
+		return "URL()"
+	}
+	return ""
+}
+
+// DescribeGenerator returns a human-readable description of the generator
+// strategy that would be used for the given column.
+func DescribeGenerator(col introspect.Column, tableName string, cfg *config.Config) string {
+	if col.IsAutoInc {
+		return "auto_increment"
+	}
+	if col.IsGenerated {
+		return "generated (skipped)"
+	}
+	if col.FK != nil {
+		return fmt.Sprintf("fk -> %s.%s", col.FK.ReferencedTable, col.FK.ReferencedColumn)
+	}
+	if col.IsPrimaryKey && !col.IsAutoInc && col.IsIntegerType() {
+		return "sequential"
+	}
+	if len(col.EnumValues) > 0 {
+		vals := col.EnumValues
+		if len(vals) > 5 {
+			vals = vals[:5]
+		}
+		return fmt.Sprintf("enum: [%s]", strings.Join(vals, ", "))
+	}
+	if tmpl := cfg.GetTemplate(tableName, col.Name); tmpl != "" {
+		return fmt.Sprintf("template: %s", tmpl)
+	}
+	if label := NameBasedLabel(col); label != "" {
+		return fmt.Sprintf("heuristic: %s", label)
+	}
+	return fmt.Sprintf("type-based: %s", strings.ToLower(col.DataType))
+}
+
 // ExistingCompositeTuple holds pre-loaded composite unique index data for incremental seeding.
 type ExistingCompositeTuple struct {
 	Columns []string

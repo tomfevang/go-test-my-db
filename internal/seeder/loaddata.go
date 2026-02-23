@@ -209,7 +209,7 @@ func seedTableLoadData(cfg Config, table *introspect.Table, fkValues map[string]
 					return
 				}
 				count := inserted.Add(int64(len(b.rows)))
-				fmt.Printf("\r[%s] %d / %d rows (%.0f%%)", table.Name, count, totalRows, float64(count)/float64(totalRows)*100)
+				printProgress(table.Name, count, int64(totalRows))
 			}
 		}()
 	}
@@ -242,7 +242,7 @@ func seedTableLoadData(cfg Config, table *introspect.Table, fkValues map[string]
 	default:
 	}
 
-	fmt.Printf("\r[%s] %d / %d rows (100%%)\n", table.Name, totalRows, totalRows)
+	printProgressDone(table.Name, totalRows)
 	return nil
 }
 

@@ -4,14 +4,48 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
+
+	"golang.org/x/term"
 
 	"github.com/tomfevang/go-seed-my-db/internal/config"
 	"github.com/tomfevang/go-seed-my-db/internal/generator"
 	"github.com/tomfevang/go-seed-my-db/internal/introspect"
 )
+
+const barWidth = 30
+
+var isTTY = sync.OnceValue(func() bool {
+	return term.IsTerminal(int(os.Stdout.Fd()))
+})
+
+// printProgress renders an inline progress bar on TTY, no-op otherwise.
+func printProgress(name string, current, total int64) {
+	if !isTTY() {
+		return
+	}
+	pct := float64(current) / float64(total)
+	filled := int(pct * barWidth)
+	if filled > barWidth {
+		filled = barWidth
+	}
+	bar := strings.Repeat("█", filled) + strings.Repeat("░", barWidth-filled)
+	fmt.Printf("\r[%s] %s %d/%d (%.0f%%)", name, bar, current, total, pct*100)
+}
+
+// printProgressDone prints the final progress state. On TTY it shows a full
+// bar; on non-TTY it prints a single summary line.
+func printProgressDone(name string, total int) {
+	if isTTY() {
+		bar := strings.Repeat("█", barWidth)
+		fmt.Printf("\r[%s] %s %d/%d (100%%)\n", name, bar, total, total)
+	} else {
+		fmt.Printf("[%s] %d rows inserted\n", name, total)
+	}
+}
 
 type Config struct {
 	DB           *sql.DB
@@ -207,7 +241,7 @@ func seedTable(cfg Config, table *introspect.Table, fkValues map[string][]any, e
 					return
 				}
 				count := inserted.Add(int64(len(b.rows)))
-				fmt.Printf("\r[%s] %d / %d rows (%.0f%%)", table.Name, count, totalRows, float64(count)/float64(totalRows)*100)
+				printProgress(table.Name, count, int64(totalRows))
 			}
 		}()
 	}
@@ -241,7 +275,7 @@ func seedTable(cfg Config, table *introspect.Table, fkValues map[string][]any, e
 	default:
 	}
 
-	fmt.Printf("\r[%s] %d / %d rows (100%%)\n", table.Name, totalRows, totalRows)
+	printProgressDone(table.Name, totalRows)
 	return nil
 }
 

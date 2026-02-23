@@ -12,6 +12,7 @@ import (
 
 	"github.com/tomfevang/go-seed-my-db/internal/config"
 	"github.com/tomfevang/go-seed-my-db/internal/depgraph"
+	"github.com/tomfevang/go-seed-my-db/internal/generator"
 	"github.com/tomfevang/go-seed-my-db/internal/introspect"
 	"github.com/tomfevang/go-seed-my-db/internal/seeder"
 )
@@ -28,6 +29,7 @@ var (
 	minChildren int
 	maxChildren int
 	maxRows     int
+	dryRun      bool
 )
 
 var rootCmd = &cobra.Command{
@@ -51,6 +53,7 @@ func init() {
 	rootCmd.Flags().IntVar(&minChildren, "min-children", 10, "Min children per parent row for child tables")
 	rootCmd.Flags().IntVar(&maxChildren, "max-children", 100, "Max children per parent row for child tables")
 	rootCmd.Flags().IntVar(&maxRows, "max-rows", 10_000_000, "Maximum rows per table (safeguard for deep hierarchies)")
+	rootCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show what would be seeded without inserting any data")
 }
 
 func Execute() error {
@@ -184,6 +187,11 @@ func runSeed(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Println()
 
+	if dryRun {
+		printDryRunDetails(orderedTables, rowCounts, relations, cfg)
+		return nil
+	}
+
 	// Seed!
 	if err := seeder.SeedAll(seeder.Config{
 		DB:           db,
@@ -266,6 +274,28 @@ func ensureAllowAllFiles(dsn string) string {
 		return dsn + "&allowAllFiles=true"
 	}
 	return dsn + "?allowAllFiles=true"
+}
+
+func printDryRunDetails(tables []*introspect.Table, rowCounts map[string]int, relations *depgraph.TableRelations, cfg *config.Config) {
+	fmt.Println("Dry-run mode — no data will be inserted.")
+	fmt.Println()
+	for _, t := range tables {
+		rc := rowCounts[t.Name]
+		header := fmt.Sprintf("%s (%d rows)", t.Name, rc)
+		if parents := relations.Parents[t.Name]; len(parents) > 0 {
+			header += fmt.Sprintf(" — child of %s", strings.Join(parents, ", "))
+		}
+		fmt.Println(header)
+		for _, col := range t.Columns {
+			strategy := generator.DescribeGenerator(col, t.Name, cfg)
+			nullable := ""
+			if col.IsNullable {
+				nullable = ", nullable"
+			}
+			fmt.Printf("  %-30s %-15s %s%s\n", col.Name, col.DataType, strategy, nullable)
+		}
+		fmt.Println()
+	}
 }
 
 func extractSchema(dsn string) string {
