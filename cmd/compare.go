@@ -29,16 +29,22 @@ var (
 )
 
 var compareCmd = &cobra.Command{
-	Use:   "compare config1.yaml config2.yaml [config3.yaml ...]",
+	Use:   "compare [comparison.yaml | config1.yaml config2.yaml ...]",
 	Short: "Compare schema performance across multiple configurations",
-	Long: `The compare subcommand runs the test workflow for each config file
+	Long: `The compare subcommand runs the test workflow for multiple configs
 and presents a side-by-side comparison of query performance.
 
-Each config provides its own schema, table definitions, seed data generators,
-and test queries. Tests are matched by name across configs where possible.
+Two modes are supported:
+
+  1. Comparison config (single arg): A YAML file with a 'configs' key that
+     references seed config files and defines per-config query variants
+     side by side in one place.
+
+  2. Multi-config (2+ args): Multiple seed config files passed as positional
+     args. Tests are matched by name across configs.
 
 Use --ai to get an AI-powered analysis of the results via Claude.`,
-	Args: cobra.MinimumNArgs(2),
+	Args: cobra.MinimumNArgs(1),
 	RunE: runCompare,
 }
 
@@ -55,26 +61,67 @@ func init() {
 	rootCmd.AddCommand(compareCmd)
 }
 
+// compareEntry groups a loaded seed config with its label and source path.
+type compareEntry struct {
+	cfg   *config.Config
+	label string
+	path  string
+}
+
 func runCompare(cmd *cobra.Command, args []string) error {
-	// 1. Load all configs — fail fast if any can't be loaded.
-	configs := make([]*config.Config, len(args))
+	// Single arg that looks like a comparison config → comparison mode.
+	if len(args) == 1 && config.IsCompareConfig(args[0]) {
+		return runCompareFromComparisonConfig(cmd, args[0])
+	}
+
+	// Legacy mode requires 2+ seed config files.
+	if len(args) < 2 {
+		return fmt.Errorf("expected a comparison config file or at least 2 seed config files")
+	}
+
+	entries := make([]compareEntry, len(args))
 	for i, path := range args {
 		cfg, err := config.Load(path)
 		if err != nil {
 			return fmt.Errorf("loading config %s: %w", path, err)
 		}
-		configs[i] = cfg
+		entries[i] = compareEntry{cfg: cfg, label: deriveLabel(path), path: path}
 	}
 
-	// 2. Resolve DSN: CLI flag → SEED_DSN env → first config with a DSN.
+	return executeComparison(cmd, entries)
+}
+
+func runCompareFromComparisonConfig(cmd *cobra.Command, path string) error {
+	cc, err := config.LoadCompare(path)
+	if err != nil {
+		return fmt.Errorf("loading comparison config %s: %w", path, err)
+	}
+
+	entries := make([]compareEntry, len(cc.Configs))
+	for i, entry := range cc.Configs {
+		cfg, err := config.Load(entry.File)
+		if err != nil {
+			return fmt.Errorf("loading seed config %s (label %q): %w", entry.File, entry.Label, err)
+		}
+		// Replace the seed config's tests with the comparison-config tests for this label.
+		cfg.Tests = cc.TestCasesForLabel(entry.Label)
+		entries[i] = compareEntry{cfg: cfg, label: entry.Label, path: entry.File}
+	}
+
+	return executeComparison(cmd, entries)
+}
+
+// executeComparison runs the shared comparison pipeline: connect, seed, test, report.
+func executeComparison(cmd *cobra.Command, entries []compareEntry) error {
+	// Resolve DSN: CLI flag → SEED_DSN env → first config with a DSN.
 	dsnVal := compareDSN
 	if !cmd.Flags().Changed("dsn") {
 		if v := os.Getenv("SEED_DSN"); v != "" {
 			dsnVal = v
 		} else {
-			for _, cfg := range configs {
-				if cfg.Options.DSN != "" {
-					dsnVal = cfg.Options.DSN
+			for _, e := range entries {
+				if e.cfg.Options.DSN != "" {
+					dsnVal = e.cfg.Options.DSN
 					break
 				}
 			}
@@ -89,7 +136,7 @@ func runCompare(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("could not extract database name from DSN — ensure it ends with /dbname")
 	}
 
-	// 3. Open a single DB connection.
+	// Open a single DB connection.
 	db, err := sql.Open("mysql", dsnVal)
 	if err != nil {
 		return fmt.Errorf("connecting to MySQL: %w", err)
@@ -97,9 +144,9 @@ func runCompare(cmd *cobra.Command, args []string) error {
 	defer db.Close()
 
 	maxWorkers := 4
-	for _, cfg := range configs {
-		if cfg.Options.Workers > maxWorkers {
-			maxWorkers = cfg.Options.Workers
+	for _, e := range entries {
+		if e.cfg.Options.Workers > maxWorkers {
+			maxWorkers = e.cfg.Options.Workers
 		}
 	}
 	if compareWorkers > maxWorkers {
@@ -112,33 +159,31 @@ func runCompare(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Printf("Connected to %s\n\n", schema)
 
-	// 4. Run each config sequentially.
-	results := make([]ConfigResult, len(args))
-	for i, path := range args {
-		cfg := configs[i]
-		label := deriveLabel(path)
-
-		schemaFile := cfg.Options.Schema
+	// Run each config sequentially.
+	total := len(entries)
+	results := make([]ConfigResult, total)
+	for i, e := range entries {
+		schemaFile := e.cfg.Options.Schema
 		if schemaFile == "" {
-			return fmt.Errorf("config %s does not specify a schema file (options.schema)", path)
+			return fmt.Errorf("config %s (label %q) does not specify a schema file (options.schema)", e.path, e.label)
 		}
 
-		rows := resolveOverride(compareRows, cfg.Options.Rows, 1000)
-		batchSize := resolveOverride(compareBatchSize, cfg.Options.BatchSize, 1000)
-		workers := resolveOverride(compareWorkers, cfg.Options.Workers, 4)
-		minC := resolveOverride(compareMinChildren, cfg.Options.ChildrenPerParent.Min, 10)
-		maxC := resolveOverride(compareMaxChildren, cfg.Options.ChildrenPerParent.Max, 100)
-		maxR := resolveOverride(compareMaxRows, cfg.Options.MaxRows, 10_000_000)
+		rows := resolveOverride(compareRows, e.cfg.Options.Rows, 1000)
+		batchSize := resolveOverride(compareBatchSize, e.cfg.Options.BatchSize, 1000)
+		workers := resolveOverride(compareWorkers, e.cfg.Options.Workers, 4)
+		minC := resolveOverride(compareMinChildren, e.cfg.Options.ChildrenPerParent.Min, 10)
+		maxC := resolveOverride(compareMaxChildren, e.cfg.Options.ChildrenPerParent.Max, 100)
+		maxR := resolveOverride(compareMaxRows, e.cfg.Options.MaxRows, 10_000_000)
 
-		fmt.Printf("[%d/%d] Running: %s (%s, %d base rows)...\n", i+1, len(args), label, schemaFile, rows)
+		fmt.Printf("[%d/%d] Running: %s (%s, %d base rows)...\n", i+1, total, e.label, schemaFile, rows)
 		start := time.Now()
 
-		testResults, tableCount, err := runTestPipeline(db, schema, cfg, schemaFile, rows, batchSize, workers, minC, maxC, maxR, cfg.Options.LoadData, cfg.Options.SeedTables)
+		testResults, tableCount, err := runTestPipeline(db, schema, e.cfg, schemaFile, rows, batchSize, workers, minC, maxC, maxR, e.cfg.Options.LoadData, e.cfg.Options.SeedTables)
 		duration := time.Since(start)
 
 		results[i] = ConfigResult{
-			ConfigPath: path,
-			Label:      label,
+			ConfigPath: e.path,
+			Label:      e.label,
 			SchemaFile: schemaFile,
 			Rows:       rows,
 			TableCount: tableCount,
@@ -148,18 +193,18 @@ func runCompare(cmd *cobra.Command, args []string) error {
 		}
 
 		if err != nil {
-			fmt.Printf("[%d/%d] Error: %s — %v\n\n", i+1, len(args), label, err)
+			fmt.Printf("[%d/%d] Error: %s — %v\n\n", i+1, total, e.label, err)
 		} else {
 			fmt.Printf("[%d/%d] Complete: %s (%d tables, %d tests, %s)\n\n",
-				i+1, len(args), label, tableCount, len(testResults), duration.Round(time.Millisecond))
+				i+1, total, e.label, tableCount, len(testResults), duration.Round(time.Millisecond))
 		}
 	}
 
-	// 5. Print comparison report.
+	// Print comparison report.
 	report := buildComparisonReport(results)
 	fmt.Print(report)
 
-	// 6. If --ai flag set, pipe to Claude.
+	// If --ai flag set, pipe to Claude.
 	if compareAI {
 		fmt.Println()
 		if err := analyzeWithAI(report, results); err != nil {
