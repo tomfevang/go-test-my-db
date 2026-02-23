@@ -28,7 +28,7 @@ type ConfigResult struct {
 // runTestPipeline runs the full create→seed→test→drop pipeline for a single
 // config against the given database connection. Tables are always dropped,
 // even on error.
-func runTestPipeline(db *sql.DB, schema string, cfg *config.Config, schemaFile string, rows, batchSize, workers, minChildren, maxChildren, maxRowsCap int, seedTables []string) ([]TestResult, int, error) {
+func runTestPipeline(db *sql.DB, schema string, cfg *config.Config, schemaFile string, rows, batchSize, workers, minChildren, maxChildren, maxRowsCap int, loadData bool, seedTables []string) ([]TestResult, int, error) {
 	// Parse DDL file.
 	statements, tableNames, err := parseDDLFile(schemaFile)
 	if err != nil {
@@ -108,6 +108,7 @@ func runTestPipeline(db *sql.DB, schema string, cfg *config.Config, schemaFile s
 		BatchSize:    batchSize,
 		Workers:      workers,
 		Clear:        false,
+		LoadData:     loadData,
 		GenConfig:    cfg,
 	}); err != nil {
 		return nil, len(tableNames), fmt.Errorf("seeding tables: %w", err)

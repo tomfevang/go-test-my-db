@@ -28,6 +28,7 @@ var (
 	previewMinChildren int
 	previewMaxChildren int
 	previewMaxRows     int
+	previewLoadData    bool
 )
 
 var previewCmd = &cobra.Command{
@@ -61,6 +62,7 @@ func init() {
 	previewCmd.Flags().IntVar(&previewMinChildren, "min-children", 10, "Min children per parent row for child tables")
 	previewCmd.Flags().IntVar(&previewMaxChildren, "max-children", 100, "Max children per parent row for child tables")
 	previewCmd.Flags().IntVar(&previewMaxRows, "max-rows", 10_000_000, "Maximum rows per table")
+	previewCmd.Flags().BoolVar(&previewLoadData, "load-data", false, "Use LOAD DATA LOCAL INFILE for faster bulk loading (requires server local_infile=ON)")
 
 	rootCmd.AddCommand(previewCmd)
 }
@@ -81,6 +83,9 @@ func runPreview(cmd *cobra.Command, args []string) error {
 	previewMinChildren = resolveInt(cmd, "min-children", previewMinChildren, cfg.Options.ChildrenPerParent.Min, 10)
 	previewMaxChildren = resolveInt(cmd, "max-children", previewMaxChildren, cfg.Options.ChildrenPerParent.Max, 100)
 	previewMaxRows = resolveInt(cmd, "max-rows", previewMaxRows, cfg.Options.MaxRows, 10_000_000)
+	if !cmd.Flags().Changed("load-data") && cfg.Options.LoadData {
+		previewLoadData = true
+	}
 
 	if previewDSN == "" {
 		return fmt.Errorf("DSN is required — set via --dsn flag, SEED_DSN env var, or options.dsn in config file")
@@ -89,6 +94,10 @@ func runPreview(cmd *cobra.Command, args []string) error {
 	schema := extractSchema(previewDSN)
 	if schema == "" {
 		return fmt.Errorf("could not extract database name from DSN — ensure it ends with /dbname")
+	}
+
+	if previewLoadData {
+		previewDSN = ensureAllowAllFiles(previewDSN)
 	}
 
 	// Connect to MySQL.
@@ -195,6 +204,7 @@ func runPreviewWithSchema(db *sql.DB, schema string, cfg *config.Config) error {
 		BatchSize:    previewBatchSize,
 		Workers:      previewWorkers,
 		Clear:        false,
+		LoadData:     previewLoadData,
 		GenConfig:    cfg,
 	}); err != nil {
 		return fmt.Errorf("seeding tables: %w", err)
@@ -461,7 +471,7 @@ func runPreviewInMemory(db *sql.DB, schema string, cfg *config.Config) error {
 			genCount = n * n * 4 // e.g., 100 rows to group across 5 parents
 		}
 
-		gen := generator.NewRowGenerator(table, tableFKValues, cfg, pkStartValues)
+		gen := generator.NewRowGenerator(table, tableFKValues, cfg, pkStartValues, nil, nil)
 		genCols := gen.Columns()
 		sampleRows := make([][]any, genCount)
 		for i := range sampleRows {

@@ -133,7 +133,7 @@ func runCompare(cmd *cobra.Command, args []string) error {
 		fmt.Printf("[%d/%d] Running: %s (%s, %d base rows)...\n", i+1, len(args), label, schemaFile, rows)
 		start := time.Now()
 
-		testResults, tableCount, err := runTestPipeline(db, schema, cfg, schemaFile, rows, batchSize, workers, minC, maxC, maxR, cfg.Options.SeedTables)
+		testResults, tableCount, err := runTestPipeline(db, schema, cfg, schemaFile, rows, batchSize, workers, minC, maxC, maxR, cfg.Options.LoadData, cfg.Options.SeedTables)
 		duration := time.Since(start)
 
 		results[i] = ConfigResult{

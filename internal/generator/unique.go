@@ -7,6 +7,7 @@ import (
 	"github.com/tomfevang/go-seed-my-db/internal/introspect"
 )
 
+
 const maxUniqueRetries = 100
 
 // uniqueTracker tracks seen values for a single-column unique constraint.
@@ -106,8 +107,60 @@ func (rg *RowGenerator) initUniqueTracking() {
 		if !allFound {
 			continue
 		}
-		rg.compositeUniques = append(rg.compositeUniques, newCompositeUniqueTracker(indices))
+		ct := newCompositeUniqueTracker(indices)
+
+		// Pre-populate with existing tuples from the database (incremental seeding).
+		for _, existing := range rg.existingComposites {
+			if !columnsMatch(idx.Columns, existing.Columns) {
+				continue
+			}
+			// Map existing tuple column order to our generated column indices.
+			for _, tuple := range existing.Tuples {
+				parts := make([]string, len(indices))
+				hasNull := false
+				for i, colName := range idx.Columns {
+					// Find tuple index for this column.
+					for j, ec := range existing.Columns {
+						if ec == colName {
+							if tuple[j] == nil {
+								hasNull = true
+								break
+							}
+							parts[i] = fmt.Sprint(tuple[j])
+							break
+						}
+					}
+					if hasNull {
+						break
+					}
+				}
+				if !hasNull {
+					key := strings.Join(parts, "\x00")
+					ct.seen[key] = true
+				}
+			}
+			break
+		}
+
+		rg.compositeUniques = append(rg.compositeUniques, ct)
 	}
+}
+
+// columnsMatch returns true if both slices contain the same column names (order-independent).
+func columnsMatch(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	set := make(map[string]bool, len(a))
+	for _, s := range a {
+		set[s] = true
+	}
+	for _, s := range b {
+		if !set[s] {
+			return false
+		}
+	}
+	return true
 }
 
 // wrapSingleUnique wraps a column's generator with retry-based uniqueness enforcement.
@@ -124,6 +177,14 @@ func (rg *RowGenerator) wrapSingleUnique(idx int, col introspect.Column) {
 	}
 
 	tracker := newUniqueTracker()
+
+	// Pre-populate with existing values from the database (incremental seeding).
+	if existing, ok := rg.existingUniques[col.Name]; ok {
+		for _, v := range existing {
+			tracker.tryAdd(v)
+		}
+	}
+
 	orig := rg.generators[idx]
 	rg.generators[idx] = func() any {
 		for attempt := range maxUniqueRetries {

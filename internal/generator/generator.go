@@ -16,22 +16,32 @@ import (
 	"github.com/tomfevang/go-seed-my-db/internal/introspect"
 )
 
+// ExistingCompositeTuple holds pre-loaded composite unique index data for incremental seeding.
+type ExistingCompositeTuple struct {
+	Columns []string
+	Tuples  [][]any
+}
+
 // RowGenerator produces rows of fake data for a given table.
 type RowGenerator struct {
-	table            *introspect.Table
-	columns          []introspect.Column // columns we actually generate (excludes auto-inc)
-	generators       []func() any
-	fkValues         map[string][]any // column name -> slice of valid FK values
-	compositeUniques []*compositeUniqueTracker
-	faker            *gofakeit.Faker
-	config           *config.Config
-	sequences        map[string]*atomic.Int64 // column name -> sequence counter for non-auto-inc PKs
+	table              *introspect.Table
+	columns            []introspect.Column // columns we actually generate (excludes auto-inc)
+	generators         []func() any
+	fkValues           map[string][]any // column name -> slice of valid FK values
+	compositeUniques   []*compositeUniqueTracker
+	faker              *gofakeit.Faker
+	config             *config.Config
+	sequences          map[string]*atomic.Int64 // column name -> sequence counter for non-auto-inc PKs
+	existingUniques    map[string][]any         // column name -> existing values for unique constraint pre-population
+	existingComposites []ExistingCompositeTuple  // composite unique index existing tuples
 }
 
 // NewRowGenerator creates a generator for the given table.
 // fkValues maps column name -> available parent IDs for FK columns.
 // pkStartValues maps column name -> starting value for non-auto-inc integer PKs.
-func NewRowGenerator(table *introspect.Table, fkValues map[string][]any, cfg *config.Config, pkStartValues map[string]int64) *RowGenerator {
+// existingUniques maps column name -> existing values for single-column unique constraints (nil to skip).
+// existingComposites provides existing tuples for composite unique indexes (nil to skip).
+func NewRowGenerator(table *introspect.Table, fkValues map[string][]any, cfg *config.Config, pkStartValues map[string]int64, existingUniques map[string][]any, existingComposites []ExistingCompositeTuple) *RowGenerator {
 	seqs := make(map[string]*atomic.Int64, len(pkStartValues))
 	for col, start := range pkStartValues {
 		seq := &atomic.Int64{}
@@ -40,11 +50,13 @@ func NewRowGenerator(table *introspect.Table, fkValues map[string][]any, cfg *co
 	}
 
 	rg := &RowGenerator{
-		table:    table,
-		fkValues: fkValues,
-		faker:    gofakeit.New(0),
-		config:   cfg,
-		sequences: seqs,
+		table:              table,
+		fkValues:           fkValues,
+		faker:              gofakeit.New(0),
+		config:             cfg,
+		sequences:          seqs,
+		existingUniques:    existingUniques,
+		existingComposites: existingComposites,
 	}
 
 	for _, col := range table.Columns {

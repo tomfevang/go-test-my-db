@@ -21,11 +21,23 @@ type Config struct {
 	BatchSize    int
 	Workers      int
 	Clear        bool
+	LoadData     bool
 	GenConfig    *config.Config
 }
 
 // SeedAll seeds all tables in the configured order.
 func SeedAll(cfg Config) error {
+	if cfg.LoadData {
+		var localInfile int
+		if err := cfg.DB.QueryRow("SELECT @@local_infile").Scan(&localInfile); err != nil {
+			return fmt.Errorf("checking local_infile: %w", err)
+		}
+		if localInfile != 1 {
+			return fmt.Errorf("LOAD DATA LOCAL INFILE requires the server to have local_infile=ON.\n" +
+				"Run: SET GLOBAL local_infile=1; (or add local-infile=1 to my.cnf)")
+		}
+	}
+
 	// Disable FK and unique checks for bulk insert performance.
 	if _, err := cfg.DB.Exec("SET FOREIGN_KEY_CHECKS=0"); err != nil {
 		return fmt.Errorf("disabling FK checks: %w", err)
@@ -37,11 +49,37 @@ func SeedAll(cfg Config) error {
 	fkCache := make(map[string][]any) // "table.column" -> values
 
 	for _, table := range cfg.Tables {
+		targetRows := cfg.RowsPerTable[table.Name]
+		if targetRows <= 0 {
+			targetRows = 1000
+		}
+
 		if cfg.Clear {
 			fmt.Printf("[%s] truncating table...\n", table.Name)
 			if _, err := cfg.DB.Exec(fmt.Sprintf("TRUNCATE TABLE `%s`", table.Name)); err != nil {
 				return fmt.Errorf("truncating %s: %w", table.Name, err)
 			}
+		} else {
+			// Incremental: check current row count.
+			currentCount, err := countRows(cfg.DB, table.Name)
+			if err != nil {
+				return fmt.Errorf("counting rows in %s: %w", table.Name, err)
+			}
+			if currentCount >= targetRows {
+				fmt.Printf("[%s] already has %d rows (target %d), skipping\n", table.Name, currentCount, targetRows)
+				// Still cache PKs for downstream FK references.
+				for _, col := range table.Columns {
+					if col.IsPrimaryKey {
+						vals, err := fetchColumnValues(cfg.DB, table.Name, col.Name)
+						if err != nil {
+							return fmt.Errorf("caching PK values for %s.%s: %w", table.Name, col.Name, err)
+						}
+						fkCache[table.Name+"."+col.Name] = vals
+					}
+				}
+				continue
+			}
+			cfg.RowsPerTable[table.Name] = targetRows - currentCount
 		}
 
 		// Build FK value map for this table's columns.
@@ -63,8 +101,21 @@ func SeedAll(cfg Config) error {
 			}
 		}
 
-		if err := seedTable(cfg, table, tableFKValues); err != nil {
-			return fmt.Errorf("seeding %s: %w", table.Name, err)
+		// Pre-load existing unique values for incremental seeding.
+		var existingUniques map[string][]any
+		var existingComposites []generator.ExistingCompositeTuple
+		if !cfg.Clear {
+			existingUniques, existingComposites, _ = fetchExistingUniques(cfg.DB, table)
+		}
+
+		if cfg.LoadData {
+			if err := seedTableLoadData(cfg, table, tableFKValues, existingUniques, existingComposites); err != nil {
+				return fmt.Errorf("seeding %s: %w", table.Name, err)
+			}
+		} else {
+			if err := seedTable(cfg, table, tableFKValues, existingUniques, existingComposites); err != nil {
+				return fmt.Errorf("seeding %s: %w", table.Name, err)
+			}
 		}
 
 		// Cache this table's primary key values for downstream FK references.
@@ -86,7 +137,7 @@ func SeedAll(cfg Config) error {
 	return nil
 }
 
-func seedTable(cfg Config, table *introspect.Table, fkValues map[string][]any) error {
+func seedTable(cfg Config, table *introspect.Table, fkValues map[string][]any, existingUniques map[string][]any, existingComposites []generator.ExistingCompositeTuple) error {
 	// Compute starting values for non-auto-increment integer PKs.
 	pkStartValues := make(map[string]int64)
 	for _, col := range table.Columns {
@@ -99,7 +150,7 @@ func seedTable(cfg Config, table *introspect.Table, fkValues map[string][]any) e
 		}
 	}
 
-	gen := generator.NewRowGenerator(table, fkValues, cfg.GenConfig, pkStartValues)
+	gen := generator.NewRowGenerator(table, fkValues, cfg.GenConfig, pkStartValues, existingUniques, existingComposites)
 	columns := gen.Columns()
 
 	if len(columns) == 0 {
@@ -210,6 +261,12 @@ func insertBatch(db *sql.DB, insertPrefix, singleRow string, numCols int, rows [
 	return err
 }
 
+func countRows(db *sql.DB, table string) (int, error) {
+	var count int
+	err := db.QueryRow(fmt.Sprintf("SELECT COUNT(*) FROM `%s`", table)).Scan(&count)
+	return count, err
+}
+
 func fetchMaxPK(db *sql.DB, table, column string) (int64, error) {
 	var maxVal sql.NullInt64
 	err := db.QueryRow(fmt.Sprintf("SELECT MAX(`%s`) FROM `%s`", column, table)).Scan(&maxVal)
@@ -238,4 +295,72 @@ func fetchColumnValues(db *sql.DB, table, column string) ([]any, error) {
 		values = append(values, v)
 	}
 	return values, rows.Err()
+}
+
+// fetchExistingUniques loads existing values for single-column unique indexes and
+// composite unique indexes from the database, for pre-populating unique trackers.
+func fetchExistingUniques(db *sql.DB, table *introspect.Table) (map[string][]any, []generator.ExistingCompositeTuple, error) {
+	uniques := make(map[string][]any)
+
+	// Single-column unique constraints.
+	for _, col := range table.Columns {
+		if !col.IsUnique || col.IsPrimaryKey || col.IsAutoInc {
+			continue
+		}
+		vals, err := fetchColumnValues(db, table.Name, col.Name)
+		if err != nil {
+			return nil, nil, err
+		}
+		if len(vals) > 0 {
+			uniques[col.Name] = vals
+		}
+	}
+
+	// Composite unique indexes.
+	var composites []generator.ExistingCompositeTuple
+	for _, idx := range table.UniqueIndexes {
+		if len(idx.Columns) < 2 {
+			continue
+		}
+		tuples, err := fetchCompositeTuples(db, table.Name, idx.Columns)
+		if err != nil {
+			return nil, nil, err
+		}
+		if len(tuples) > 0 {
+			composites = append(composites, generator.ExistingCompositeTuple{
+				Columns: idx.Columns,
+				Tuples:  tuples,
+			})
+		}
+	}
+
+	return uniques, composites, nil
+}
+
+// fetchCompositeTuples queries SELECT DISTINCT col1, col2, ... FROM table.
+func fetchCompositeTuples(db *sql.DB, table string, columns []string) ([][]any, error) {
+	quoted := make([]string, len(columns))
+	for i, c := range columns {
+		quoted[i] = "`" + c + "`"
+	}
+	query := fmt.Sprintf("SELECT DISTINCT %s FROM `%s`", strings.Join(quoted, ", "), table)
+	rows, err := db.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var tuples [][]any
+	for rows.Next() {
+		tuple := make([]any, len(columns))
+		ptrs := make([]any, len(columns))
+		for i := range tuple {
+			ptrs[i] = &tuple[i]
+		}
+		if err := rows.Scan(ptrs...); err != nil {
+			return nil, err
+		}
+		tuples = append(tuples, tuple)
+	}
+	return tuples, rows.Err()
 }

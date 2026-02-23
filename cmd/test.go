@@ -40,6 +40,7 @@ var (
 	testMinChildren int
 	testMaxChildren int
 	testMaxRows     int
+	testLoadData    bool
 )
 
 var testCmd = &cobra.Command{
@@ -63,6 +64,7 @@ func init() {
 	testCmd.Flags().IntVar(&testMinChildren, "min-children", 10, "Min children per parent row for child tables")
 	testCmd.Flags().IntVar(&testMaxChildren, "max-children", 100, "Max children per parent row for child tables")
 	testCmd.Flags().IntVar(&testMaxRows, "max-rows", 10_000_000, "Maximum rows per table (safeguard for deep hierarchies)")
+	testCmd.Flags().BoolVar(&testLoadData, "load-data", false, "Use LOAD DATA LOCAL INFILE for faster bulk loading (requires server local_infile=ON)")
 
 	rootCmd.AddCommand(testCmd)
 }
@@ -92,6 +94,9 @@ func runTest(cmd *cobra.Command, args []string) error {
 	testMinChildren = resolveInt(cmd, "min-children", testMinChildren, cfg.Options.ChildrenPerParent.Min, 10)
 	testMaxChildren = resolveInt(cmd, "max-children", testMaxChildren, cfg.Options.ChildrenPerParent.Max, 100)
 	testMaxRows = resolveInt(cmd, "max-rows", testMaxRows, cfg.Options.MaxRows, 10_000_000)
+	if !cmd.Flags().Changed("load-data") && cfg.Options.LoadData {
+		testLoadData = true
+	}
 
 	if testDSN == "" {
 		return fmt.Errorf("DSN is required — set via --dsn flag, SEED_DSN env var, or options.dsn in config file")
@@ -104,6 +109,10 @@ func runTest(cmd *cobra.Command, args []string) error {
 	schema := extractSchema(testDSN)
 	if schema == "" {
 		return fmt.Errorf("could not extract database name from DSN — ensure it ends with /dbname")
+	}
+
+	if testLoadData {
+		testDSN = ensureAllowAllFiles(testDSN)
 	}
 
 	// Connect to MySQL.
@@ -126,7 +135,7 @@ func runTest(cmd *cobra.Command, args []string) error {
 	}
 
 	// Run the pipeline: create → seed → test → drop.
-	results, _, err := runTestPipeline(db, schema, cfg, testSchemaFile, testRows, testBatchSize, testWorkers, testMinChildren, testMaxChildren, testMaxRows, seedTables)
+	results, _, err := runTestPipeline(db, schema, cfg, testSchemaFile, testRows, testBatchSize, testWorkers, testMinChildren, testMaxChildren, testMaxRows, testLoadData, seedTables)
 	if err != nil {
 		return err
 	}

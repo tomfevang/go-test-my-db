@@ -23,6 +23,7 @@ var (
 	batchSize   int
 	workers     int
 	clear       bool
+	loadData    bool
 	configPath  string
 	minChildren int
 	maxChildren int
@@ -46,6 +47,7 @@ func init() {
 	rootCmd.Flags().IntVar(&workers, "workers", 4, "Concurrent insert workers")
 	rootCmd.Flags().BoolVar(&clear, "clear", false, "Truncate target tables before seeding")
 	rootCmd.Flags().StringVar(&configPath, "config", "", "Path to config YAML file (default: auto-detect go-seed-my-db.yaml)")
+	rootCmd.Flags().BoolVar(&loadData, "load-data", false, "Use LOAD DATA LOCAL INFILE for faster bulk loading (requires server local_infile=ON)")
 	rootCmd.Flags().IntVar(&minChildren, "min-children", 10, "Min children per parent row for child tables")
 	rootCmd.Flags().IntVar(&maxChildren, "max-children", 100, "Max children per parent row for child tables")
 	rootCmd.Flags().IntVar(&maxRows, "max-rows", 10_000_000, "Maximum rows per table (safeguard for deep hierarchies)")
@@ -72,6 +74,9 @@ func runSeed(cmd *cobra.Command, args []string) error {
 	minChildren = resolveInt(cmd, "min-children", minChildren, cfg.Options.ChildrenPerParent.Min, 10)
 	maxChildren = resolveInt(cmd, "max-children", maxChildren, cfg.Options.ChildrenPerParent.Max, 100)
 	maxRows = resolveInt(cmd, "max-rows", maxRows, cfg.Options.MaxRows, 10_000_000)
+	if !cmd.Flags().Changed("load-data") && cfg.Options.LoadData {
+		loadData = true
+	}
 
 	if dsn == "" {
 		return fmt.Errorf("DSN is required — set via --dsn flag, SEED_DSN env var, or options.dsn in config file")
@@ -81,6 +86,11 @@ func runSeed(cmd *cobra.Command, args []string) error {
 	schema := extractSchema(dsn)
 	if schema == "" {
 		return fmt.Errorf("could not extract database name from DSN — ensure it ends with /dbname")
+	}
+
+	// Enable allowAllFiles in the DSN when using LOAD DATA mode.
+	if loadData {
+		dsn = ensureAllowAllFiles(dsn)
 	}
 
 	// Connect to MySQL.
@@ -183,6 +193,7 @@ func runSeed(cmd *cobra.Command, args []string) error {
 		BatchSize:    batchSize,
 		Workers:      workers,
 		Clear:        clear,
+		LoadData:     loadData,
 		GenConfig:    cfg,
 	}); err != nil {
 		return err
@@ -243,6 +254,18 @@ func computeRowCounts(
 	}
 
 	return rowCounts
+}
+
+// ensureAllowAllFiles appends allowAllFiles=true to the DSN if not already present.
+// This is required by the go-sql-driver/mysql driver for LOAD DATA LOCAL INFILE.
+func ensureAllowAllFiles(dsn string) string {
+	if strings.Contains(dsn, "allowAllFiles") {
+		return dsn
+	}
+	if strings.Contains(dsn, "?") {
+		return dsn + "&allowAllFiles=true"
+	}
+	return dsn + "?allowAllFiles=true"
 }
 
 func extractSchema(dsn string) string {

@@ -48,6 +48,7 @@ type Options struct {
 	Workers           int              `yaml:"workers"`
 	ChildrenPerParent ChildrenPerParent `yaml:"children_per_parent"`
 	MaxRows           int              `yaml:"max_rows"`
+	LoadData          bool             `yaml:"load_data"`
 }
 
 type Config struct {
