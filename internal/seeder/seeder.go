@@ -14,14 +14,14 @@ import (
 )
 
 type Config struct {
-	DB         *sql.DB
-	Schema     string
-	Tables     []*introspect.Table // in topological order
-	Rows       int
-	BatchSize  int
-	Workers    int
-	Clear      bool
-	GenConfig  *config.Config
+	DB           *sql.DB
+	Schema       string
+	Tables       []*introspect.Table // in topological order
+	RowsPerTable map[string]int      // pre-computed row count per table
+	BatchSize    int
+	Workers      int
+	Clear        bool
+	GenConfig    *config.Config
 }
 
 // SeedAll seeds all tables in the configured order.
@@ -87,7 +87,19 @@ func SeedAll(cfg Config) error {
 }
 
 func seedTable(cfg Config, table *introspect.Table, fkValues map[string][]any) error {
-	gen := generator.NewRowGenerator(table, fkValues, cfg.GenConfig)
+	// Compute starting values for non-auto-increment integer PKs.
+	pkStartValues := make(map[string]int64)
+	for _, col := range table.Columns {
+		if col.IsPrimaryKey && !col.IsAutoInc && col.IsIntegerType() {
+			maxVal, err := fetchMaxPK(cfg.DB, table.Name, col.Name)
+			if err != nil {
+				return fmt.Errorf("fetching max PK for %s.%s: %w", table.Name, col.Name, err)
+			}
+			pkStartValues[col.Name] = maxVal + 1
+		}
+	}
+
+	gen := generator.NewRowGenerator(table, fkValues, cfg.GenConfig, pkStartValues)
 	columns := gen.Columns()
 
 	if len(columns) == 0 {
@@ -95,7 +107,10 @@ func seedTable(cfg Config, table *introspect.Table, fkValues map[string][]any) e
 		return nil
 	}
 
-	totalRows := cfg.Rows
+	totalRows := cfg.RowsPerTable[table.Name]
+	if totalRows <= 0 {
+		totalRows = 1000
+	}
 	batchSize := cfg.BatchSize
 	if batchSize > totalRows {
 		batchSize = totalRows
@@ -193,6 +208,18 @@ func insertBatch(db *sql.DB, insertPrefix, singleRow string, numCols int, rows [
 
 	_, err := db.Exec(query, args...)
 	return err
+}
+
+func fetchMaxPK(db *sql.DB, table, column string) (int64, error) {
+	var maxVal sql.NullInt64
+	err := db.QueryRow(fmt.Sprintf("SELECT MAX(`%s`) FROM `%s`", column, table)).Scan(&maxVal)
+	if err != nil {
+		return 0, err
+	}
+	if !maxVal.Valid {
+		return 0, nil // empty table, start from 1
+	}
+	return maxVal.Int64, nil
 }
 
 func fetchColumnValues(db *sql.DB, table, column string) ([]any, error) {

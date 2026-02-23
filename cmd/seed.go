@@ -3,6 +3,7 @@ package cmd
 import (
 	"database/sql"
 	"fmt"
+	"math/rand/v2"
 	"strings"
 	"time"
 
@@ -16,13 +17,16 @@ import (
 )
 
 var (
-	dsn        string
-	tables     []string
-	rows       int
-	batchSize  int
-	workers    int
-	clear      bool
-	configPath string
+	dsn         string
+	tables      []string
+	rows        int
+	batchSize   int
+	workers     int
+	clear       bool
+	configPath  string
+	minChildren int
+	maxChildren int
+	maxRows     int
 )
 
 var rootCmd = &cobra.Command{
@@ -42,8 +46,9 @@ func init() {
 	rootCmd.Flags().IntVar(&workers, "workers", 4, "Concurrent insert workers")
 	rootCmd.Flags().BoolVar(&clear, "clear", false, "Truncate target tables before seeding")
 	rootCmd.Flags().StringVar(&configPath, "config", "", "Path to config YAML file (default: auto-detect go-seed-my-db.yaml)")
-
-	rootCmd.MarkFlagRequired("dsn")
+	rootCmd.Flags().IntVar(&minChildren, "min-children", 10, "Min children per parent row for child tables")
+	rootCmd.Flags().IntVar(&maxChildren, "max-children", 100, "Max children per parent row for child tables")
+	rootCmd.Flags().IntVar(&maxRows, "max-rows", 10_000_000, "Maximum rows per table (safeguard for deep hierarchies)")
 }
 
 func Execute() error {
@@ -57,6 +62,19 @@ func runSeed(cmd *cobra.Command, args []string) error {
 	cfg, err := config.LoadOrDefault(configPath)
 	if err != nil {
 		return fmt.Errorf("loading config: %w", err)
+	}
+
+	// Resolve operational parameters: CLI flag > env var > config > default.
+	dsn = resolveString(cmd, "dsn", dsn, "SEED_DSN", cfg.Options.DSN, "")
+	rows = resolveInt(cmd, "rows", rows, cfg.Options.Rows, 1000)
+	batchSize = resolveInt(cmd, "batch-size", batchSize, cfg.Options.BatchSize, 1000)
+	workers = resolveInt(cmd, "workers", workers, cfg.Options.Workers, 4)
+	minChildren = resolveInt(cmd, "min-children", minChildren, cfg.Options.ChildrenPerParent.Min, 10)
+	maxChildren = resolveInt(cmd, "max-children", maxChildren, cfg.Options.ChildrenPerParent.Max, 100)
+	maxRows = resolveInt(cmd, "max-rows", maxRows, cfg.Options.MaxRows, 10_000_000)
+
+	if dsn == "" {
+		return fmt.Errorf("DSN is required — set via --dsn flag, SEED_DSN env var, or options.dsn in config file")
 	}
 
 	// Extract schema name from DSN. The DSN format is user:pass@tcp(host:port)/dbname
@@ -78,10 +96,12 @@ func runSeed(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Printf("Connected to %s\n", schema)
 
-	// Determine which tables to seed.
+	// Determine which tables to seed: CLI flag > config > all tables.
 	var tableNames []string
 	if len(tables) > 0 {
 		tableNames = tables
+	} else if len(cfg.Options.SeedTables) > 0 {
+		tableNames = cfg.Options.SeedTables
 	} else {
 		tableNames, err = introspect.ListTables(db, schema)
 		if err != nil {
@@ -107,6 +127,11 @@ func runSeed(cmd *cobra.Command, args []string) error {
 		allTables[name] = t
 	}
 
+	// Apply config-declared references (logical FKs without actual constraints).
+	if refs := cfg.GetReferences(); refs != nil {
+		introspect.ApplyReferences(allTables, refs)
+	}
+
 	// Build the requested table set.
 	requestedTables := make(map[string]*introspect.Table, len(tableNames))
 	for _, name := range tableNames {
@@ -118,7 +143,7 @@ func runSeed(cmd *cobra.Command, args []string) error {
 	}
 
 	// Resolve FK dependencies (topological order, auto-include parents).
-	order, autoIncluded, err := depgraph.Resolve(requestedTables, allTables)
+	order, autoIncluded, relations, err := depgraph.Resolve(requestedTables, allTables)
 	if err != nil {
 		return err
 	}
@@ -133,29 +158,91 @@ func runSeed(cmd *cobra.Command, args []string) error {
 		orderedTables[i] = requestedTables[name]
 	}
 
-	fmt.Printf("Seeding %d tables with %d rows each (%d workers, batch size %d)\n\n",
-		len(orderedTables), rows, workers, batchSize)
+	// Compute per-table row counts.
+	rowCounts := computeRowCounts(order, relations, cfg, rows, minChildren, maxChildren, maxRows)
+
+	totalRowCount := 0
+	fmt.Printf("Seeding %d tables (%d workers, batch size %d):\n", len(orderedTables), workers, batchSize)
+	for _, t := range orderedTables {
+		rc := rowCounts[t.Name]
+		totalRowCount += rc
+		if parents := relations.Parents[t.Name]; len(parents) > 0 {
+			fmt.Printf("  %-30s %10d rows (child of %s)\n", t.Name, rc, strings.Join(parents, ", "))
+		} else {
+			fmt.Printf("  %-30s %10d rows (root)\n", t.Name, rc)
+		}
+	}
+	fmt.Println()
 
 	// Seed!
 	if err := seeder.SeedAll(seeder.Config{
-		DB:        db,
-		Schema:    schema,
-		Tables:    orderedTables,
-		Rows:      rows,
-		BatchSize: batchSize,
-		Workers:   workers,
-		Clear:     clear,
-		GenConfig: cfg,
+		DB:           db,
+		Schema:       schema,
+		Tables:       orderedTables,
+		RowsPerTable: rowCounts,
+		BatchSize:    batchSize,
+		Workers:      workers,
+		Clear:        clear,
+		GenConfig:    cfg,
 	}); err != nil {
 		return err
 	}
 
 	elapsed := time.Since(start)
-	totalRows := len(orderedTables) * rows
 	fmt.Printf("\nDone! Inserted %d total rows across %d tables in %s\n",
-		totalRows, len(orderedTables), elapsed.Round(time.Millisecond))
+		totalRowCount, len(orderedTables), elapsed.Round(time.Millisecond))
 
 	return nil
+}
+
+// computeRowCounts determines how many rows to generate for each table.
+// Root tables (no FK parents in the seed set) get the base row count.
+// Child tables get parent_rows * random_multiplier from [minC, maxC].
+// Per-table config overrides take highest priority.
+func computeRowCounts(
+	order []string,
+	relations *depgraph.TableRelations,
+	cfg *config.Config,
+	baseRows, minC, maxC, maxRowsCap int,
+) map[string]int {
+	rowCounts := make(map[string]int, len(order))
+
+	for _, tableName := range order {
+		// Priority 1: Per-table config override.
+		if tc, ok := cfg.Tables[tableName]; ok && tc.Rows > 0 {
+			rowCounts[tableName] = tc.Rows
+			continue
+		}
+
+		// Priority 2: Compute based on parentage.
+		parents := relations.Parents[tableName]
+		if len(parents) == 0 {
+			rowCounts[tableName] = baseRows
+			continue
+		}
+
+		// Child table: find the parent with the most rows.
+		maxParentRows := 0
+		for _, parent := range parents {
+			if pr, ok := rowCounts[parent]; ok && pr > maxParentRows {
+				maxParentRows = pr
+			}
+		}
+
+		multiplier := minC
+		if maxC > minC {
+			multiplier = minC + rand.IntN(maxC-minC+1)
+		}
+
+		computed := maxParentRows * multiplier
+		if computed > maxRowsCap {
+			computed = maxRowsCap
+		}
+
+		rowCounts[tableName] = computed
+	}
+
+	return rowCounts
 }
 
 func extractSchema(dsn string) string {

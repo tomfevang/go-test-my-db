@@ -7,13 +7,19 @@ import (
 	"github.com/tomfevang/go-seed-my-db/internal/introspect"
 )
 
+// TableRelations holds parent relationship information for each table.
+type TableRelations struct {
+	// Parents maps each table name to its parent table names (via FK) within the seed set.
+	Parents map[string][]string
+}
+
 // Resolve takes a map of table name -> Table and returns tables in topological
 // order (parents before children). It auto-includes any referenced parent tables
 // that are present in allTables but missing from the requested set.
 //
-// Returns the ordered list of table names, any auto-included parent names, and an error
-// if circular dependencies are detected.
-func Resolve(tables map[string]*introspect.Table, allTables map[string]*introspect.Table) ([]string, []string, error) {
+// Returns the ordered list of table names, any auto-included parent names,
+// table relations, and an error if circular dependencies are detected.
+func Resolve(tables map[string]*introspect.Table, allTables map[string]*introspect.Table) ([]string, []string, *TableRelations, error) {
 	// Auto-include parent tables that were not explicitly requested.
 	var autoIncluded []string
 	changed := true
@@ -88,10 +94,40 @@ func Resolve(tables map[string]*introspect.Table, allTables map[string]*introspe
 	if len(order) != len(tables) {
 		// Find the cycle for a helpful error message.
 		cycle := detectCycle(tables)
-		return nil, nil, fmt.Errorf("circular foreign key dependency detected: %s", strings.Join(cycle, " -> "))
+		return nil, nil, nil, fmt.Errorf("circular foreign key dependency detected: %s", strings.Join(cycle, " -> "))
 	}
 
-	return order, autoIncluded, nil
+	// Build parent relationships (child -> deduplicated list of parents).
+	parents := make(map[string][]string)
+	for _, t := range tables {
+		for _, col := range t.Columns {
+			if col.FK == nil {
+				continue
+			}
+			p := col.FK.ReferencedTable
+			if p == t.Name {
+				continue
+			}
+			if _, ok := tables[p]; !ok {
+				continue
+			}
+			parents[t.Name] = append(parents[t.Name], p)
+		}
+	}
+	// Deduplicate (a table might have multiple FK columns to the same parent).
+	for name, ps := range parents {
+		seen := make(map[string]bool)
+		deduped := ps[:0]
+		for _, p := range ps {
+			if !seen[p] {
+				seen[p] = true
+				deduped = append(deduped, p)
+			}
+		}
+		parents[name] = deduped
+	}
+
+	return order, autoIncluded, &TableRelations{Parents: parents}, nil
 }
 
 func detectCycle(tables map[string]*introspect.Table) []string {

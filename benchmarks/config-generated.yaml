@@ -1,0 +1,110 @@
+options:
+  schema: "benchmarks/schema.sql"
+  rows: 10000
+
+tables:
+  AccountCheck:
+    columns:
+      companyId: "{{Number 1 5000}}"
+      details: |-
+        {"region": "{{RandomString (SliceString "EMEA" "APAC" "NAM" "LATAM")}}", "source": "{{RandomString (SliceString "ERP" "BANK" "MANUAL")}}"}
+      anomalyType: '{{RandomString (SliceString "DUPLICATE" "MISSING" "MISMATCH" "OUTLIER" "STALE")}}'
+      accountNumber: '{{Numerify "####-####-##"}}'
+
+  AccountAnomaly:
+    references:
+      accountCheckId: AccountCheck.id
+    columns:
+      details: |-
+        {"severity": "{{RandomString (SliceString "LOW" "MEDIUM" "HIGH" "CRITICAL")}}", "amount": {{Number 0 100}}, "message": "{{HackerPhrase}}"}
+      date: '{{printf "%04d-%02d-%02d" (Number 2020 2025) (Number 1 12) (Number 1 28)}}'
+      status: '{{RandomString (SliceString "OPEN" "INVESTIGATING" "RESOLVED" "DISMISSED")}}'
+
+tests:
+  # --- Indexed filter: gen-col uses idx_severity, JSON path forces full scan ---
+  - name: "gen-col: severity (indexed)"
+    query: |-
+      SELECT id, _severity, date, status FROM AccountAnomaly WHERE _severity = '{{RandomString (SliceString "LOW" "MEDIUM" "HIGH" "CRITICAL")}}'
+    repeat: 100
+  - name: "json-path: severity (full scan)"
+    query: |-
+      SELECT id, details->>'$.severity' AS severity, date, status FROM AccountAnomaly WHERE details->>'$.severity' = '{{RandomString (SliceString "LOW" "MEDIUM" "HIGH" "CRITICAL")}}'
+    repeat: 100
+
+  # --- 2-col composite: gen-col uses idx_severity_date ---
+  - name: "gen-col: severity + date (composite)"
+    query: |-
+      SELECT id, _severity, date, status FROM AccountAnomaly WHERE _severity = '{{RandomString (SliceString "LOW" "MEDIUM" "HIGH" "CRITICAL")}}' AND date >= '2024-01-01'
+    repeat: 100
+  - name: "json-path: severity + date"
+    query: |-
+      SELECT id, details->>'$.severity' AS severity, date, status FROM AccountAnomaly WHERE details->>'$.severity' = '{{RandomString (SliceString "LOW" "MEDIUM" "HIGH" "CRITICAL")}}' AND date >= '2024-01-01'
+    repeat: 100
+
+  # --- 3-col composite: gen-col uses idx_severity_status_date ---
+  - name: "gen-col: severity + status + date (full composite)"
+    query: |-
+      SELECT id, _severity, date, status FROM AccountAnomaly WHERE _severity = '{{RandomString (SliceString "LOW" "MEDIUM" "HIGH" "CRITICAL")}}' AND status = '{{RandomString (SliceString "OPEN" "INVESTIGATING" "RESOLVED" "DISMISSED")}}' AND date >= '2024-01-01'
+    repeat: 100
+  - name: "json-path: severity + status + date"
+    query: |-
+      SELECT id, details->>'$.severity' AS severity, date, status FROM AccountAnomaly WHERE details->>'$.severity' = '{{RandomString (SliceString "LOW" "MEDIUM" "HIGH" "CRITICAL")}}' AND status = '{{RandomString (SliceString "OPEN" "INVESTIGATING" "RESOLVED" "DISMISSED")}}' AND date >= '2024-01-01'
+    repeat: 100
+
+  # --- Full scan: no index on _amount — measures per-row extraction overhead ---
+  - name: "gen-col: amount range (full scan)"
+    query: "SELECT id, _amount, status FROM AccountAnomaly WHERE _amount > 90"
+    repeat: 100
+  - name: "json-path: amount range (full scan)"
+    query: "SELECT id, CAST(details->>'$.amount' AS SIGNED) AS amount, status FROM AccountAnomaly WHERE CAST(details->>'$.amount' AS SIGNED) > 90"
+    repeat: 100
+
+  # --- Off-index with gen vs json: status has no index ---
+  - name: "gen-col: status + amount (off-index)"
+    query: |-
+      SELECT id, _severity, _amount, status FROM AccountAnomaly WHERE status = '{{RandomString (SliceString "OPEN" "INVESTIGATING" "RESOLVED" "DISMISSED")}}' AND _amount > 90
+    repeat: 100
+  - name: "json-path: status + amount (off-index)"
+    query: |-
+      SELECT id, details->>'$.severity' AS severity, CAST(details->>'$.amount' AS SIGNED) AS amount, status FROM AccountAnomaly WHERE status = '{{RandomString (SliceString "OPEN" "INVESTIGATING" "RESOLVED" "DISMISSED")}}' AND CAST(details->>'$.amount' AS SIGNED) > 90
+    repeat: 100
+
+  # --- ORDER BY: index-ordered vs filesort ---
+  - name: "gen-col: severity ORDER BY date (index-ordered)"
+    query: |-
+      SELECT id, _severity, date FROM AccountAnomaly WHERE _severity = '{{RandomString (SliceString "LOW" "MEDIUM" "HIGH" "CRITICAL")}}' ORDER BY date LIMIT 50
+    repeat: 100
+  - name: "gen-col: severity ORDER BY _amount (filesort)"
+    query: |-
+      SELECT id, _severity, _amount FROM AccountAnomaly WHERE _severity = '{{RandomString (SliceString "LOW" "MEDIUM" "HIGH" "CRITICAL")}}' ORDER BY _amount LIMIT 50
+    repeat: 100
+  - name: "off-index: status ORDER BY date (full scan + filesort)"
+    query: |-
+      SELECT id, status, date FROM AccountAnomaly WHERE status = '{{RandomString (SliceString "OPEN" "INVESTIGATING" "RESOLVED" "DISMISSED")}}' ORDER BY date LIMIT 50
+    repeat: 100
+
+  # --- JOIN: parent + child filter on both tables ---
+  - name: "gen-col: join + filter both"
+    query: |-
+      SELECT a.id, a._severity, a.date, c.anomalyType FROM AccountAnomaly a JOIN AccountCheck c ON a.accountCheckId = c.id WHERE a._severity = '{{RandomString (SliceString "LOW" "MEDIUM" "HIGH" "CRITICAL")}}' AND c._region = '{{RandomString (SliceString "EMEA" "APAC" "NAM" "LATAM")}}'
+    repeat: 100
+  - name: "json-path: join + filter both"
+    query: |-
+      SELECT a.id, a.details->>'$.severity' AS severity, a.date, c.anomalyType FROM AccountAnomaly a JOIN AccountCheck c ON a.accountCheckId = c.id WHERE a.details->>'$.severity' = '{{RandomString (SliceString "LOW" "MEDIUM" "HIGH" "CRITICAL")}}' AND c.details->>'$.region' = '{{RandomString (SliceString "EMEA" "APAC" "NAM" "LATAM")}}'
+    repeat: 100
+
+  # --- Aggregation (no templates — GROUP BY touches all values anyway) ---
+  - name: "gen-col: GROUP BY severity"
+    query: "SELECT _severity, COUNT(*) AS cnt FROM AccountAnomaly GROUP BY _severity"
+    repeat: 100
+  - name: "json-path: GROUP BY severity"
+    query: "SELECT details->>'$.severity' AS severity, COUNT(*) AS cnt FROM AccountAnomaly GROUP BY details->>'$.severity'"
+    repeat: 100
+  - name: "gen-col: filtered aggregation"
+    query: |-
+      SELECT status, COUNT(*), AVG(_amount) FROM AccountAnomaly WHERE _severity = '{{RandomString (SliceString "LOW" "MEDIUM" "HIGH" "CRITICAL")}}' GROUP BY status
+    repeat: 100
+  - name: "json-path: filtered aggregation"
+    query: |-
+      SELECT status, COUNT(*), AVG(CAST(details->>'$.amount' AS SIGNED)) FROM AccountAnomaly WHERE details->>'$.severity' = '{{RandomString (SliceString "LOW" "MEDIUM" "HIGH" "CRITICAL")}}' GROUP BY status
+    repeat: 100
