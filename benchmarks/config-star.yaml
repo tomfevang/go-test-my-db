@@ -1,22 +1,32 @@
 options:
   schema: "benchmarks/schema-star.sql"
-  rows: 100000
   seed_tables:
+    - BenchCompany
     - AccountCheckStar
     - AccountAnomalyStar
 
 tables:
-  AccountCheckStar:
+  BenchCompany:
+    rows: 100
     columns:
-      companyId: "{{Number 1 5000}}"
+      name: "{{Company}}"
+
+  AccountCheckStar:
+    rows: 50000
+    references:
+      companyId: BenchCompany.id
+    columns:
       anomalyType: '{{RandomString (SliceString "DUPLICATE" "MISSING" "MISMATCH" "OUTLIER" "STALE")}}'
       accountNumber: '{{Numerify "####-####-##"}}'
       regionId: "{{Number 1 4}}"
       sourceId: "{{Number 1 3}}"
 
   AccountAnomalyStar:
+    rows: 500000
+    references:
+      accountCheckId: AccountCheckStar.id
+      companyId: BenchCompany.id
     columns:
-      accountCheckId: "{{Number 1 100000}}"
       severityId: "{{Number 1 4}}"
       statusId: "{{Number 1 4}}"
       date: '{{printf "%04d-%02d-%02d" (Number 2020 2025) (Number 1 12) (Number 1 28)}}'
@@ -24,52 +34,65 @@ tables:
       message: "{{HackerPhrase}}"
 
 tests:
-  # --- Dimension JOIN overhead: same filter, with and without JOINs ---
-  - name: "bare filter: severityId (no JOINs)"
-    query: "SELECT a.id, a.severityId, a.date, a.statusId FROM AccountAnomalyStar a WHERE a.severityId = {{Number 1 4}}"
-    repeat: 100
-  - name: "with dim JOINs: severityId (2 dim JOINs)"
-    query: "SELECT a.id, s.name AS severity, a.date, st.name AS status FROM AccountAnomalyStar a JOIN DimSeverity s ON s.id = a.severityId JOIN DimStatus st ON st.id = a.statusId WHERE a.severityId = {{Number 1 4}}"
+  # --- Shared names match across configs for compare ---
+
+  - name: "company + severity"
+    query: |-
+      SELECT a.id, s.name AS severity, a.date, st.name AS status FROM AccountAnomalyStar a JOIN DimSeverity s ON s.id = a.severityId JOIN DimStatus st ON st.id = a.statusId WHERE a.companyId = {{Number 1 100}} AND a.severityId = {{Number 1 4}}
     repeat: 100
 
-  # --- Composite index depth: idx_severity_date ---
-  - name: "composite: severity + date"
-    query: "SELECT a.id, s.name AS severity, a.date, st.name AS status FROM AccountAnomalyStar a JOIN DimSeverity s ON s.id = a.severityId JOIN DimStatus st ON st.id = a.statusId WHERE a.severityId = {{Number 1 4}} AND a.date >= '2024-01-01'"
+  - name: "company + severity + date"
+    query: |-
+      SELECT a.id, s.name AS severity, a.date, st.name AS status FROM AccountAnomalyStar a JOIN DimSeverity s ON s.id = a.severityId JOIN DimStatus st ON st.id = a.statusId WHERE a.companyId = {{Number 1 100}} AND a.severityId = {{Number 1 4}} AND a.date >= '2024-01-01'
     repeat: 100
 
-  # --- Full composite: idx_severity_status_date ---
-  - name: "full composite: severity + status + date"
-    query: "SELECT a.id, s.name AS severity, a.date, st.name AS status FROM AccountAnomalyStar a JOIN DimSeverity s ON s.id = a.severityId JOIN DimStatus st ON st.id = a.statusId WHERE a.severityId = {{Number 1 4}} AND a.statusId = {{Number 1 4}} AND a.date >= '2024-01-01'"
+  - name: "company + severity + status + date"
+    query: |-
+      SELECT a.id, s.name AS severity, a.date, st.name AS status FROM AccountAnomalyStar a JOIN DimSeverity s ON s.id = a.severityId JOIN DimStatus st ON st.id = a.statusId WHERE a.companyId = {{Number 1 100}} AND a.severityId = {{Number 1 4}} AND a.statusId = {{Number 1 4}} AND a.date >= '2024-01-01'
     repeat: 100
 
-  # --- Off-index: amount has no index, forces full scan ---
-  - name: "off-index: amount range (full scan)"
-    query: "SELECT a.id, a.amount, st.name AS status FROM AccountAnomalyStar a JOIN DimStatus st ON st.id = a.statusId WHERE a.amount > 90"
-    repeat: 100
-  - name: "off-index: status + amount"
-    query: "SELECT a.id, s.name AS severity, a.amount, st.name AS status FROM AccountAnomalyStar a JOIN DimSeverity s ON s.id = a.severityId JOIN DimStatus st ON st.id = a.statusId WHERE a.statusId = {{Number 1 4}} AND a.amount > 90"
+  - name: "company + amount range"
+    query: |-
+      SELECT a.id, a.amount, st.name AS status FROM AccountAnomalyStar a JOIN DimStatus st ON st.id = a.statusId WHERE a.companyId = {{Number 1 100}} AND a.amount > 90
     repeat: 100
 
-  # --- ORDER BY: index-ordered vs filesort ---
-  - name: "severity ORDER BY date (index-ordered)"
-    query: "SELECT a.id, s.name AS severity, a.date FROM AccountAnomalyStar a JOIN DimSeverity s ON s.id = a.severityId WHERE a.severityId = {{Number 1 4}} ORDER BY a.date LIMIT 50"
-    repeat: 100
-  - name: "severity ORDER BY amount (filesort)"
-    query: "SELECT a.id, s.name AS severity, a.amount FROM AccountAnomalyStar a JOIN DimSeverity s ON s.id = a.severityId WHERE a.severityId = {{Number 1 4}} ORDER BY a.amount LIMIT 50"
-    repeat: 100
-  - name: "off-index: status ORDER BY date (full scan + filesort)"
-    query: "SELECT a.id, st.name AS status, a.date FROM AccountAnomalyStar a JOIN DimStatus st ON st.id = a.statusId WHERE a.statusId = {{Number 1 4}} ORDER BY a.date LIMIT 50"
+  - name: "company + status + amount"
+    query: |-
+      SELECT a.id, s.name AS severity, a.amount, st.name AS status FROM AccountAnomalyStar a JOIN DimSeverity s ON s.id = a.severityId JOIN DimStatus st ON st.id = a.statusId WHERE a.companyId = {{Number 1 100}} AND a.statusId = {{Number 1 4}} AND a.amount > 90
     repeat: 100
 
-  # --- Parent JOIN: filter across fact + parent tables ---
-  - name: "join parent: severity + region"
-    query: "SELECT a.id, s.name AS severity, a.date, c.anomalyType FROM AccountAnomalyStar a JOIN DimSeverity s ON s.id = a.severityId JOIN AccountCheckStar c ON a.accountCheckId = c.id WHERE a.severityId = {{Number 1 4}} AND c.regionId = {{Number 1 4}}"
+  - name: "ORDER BY: severity + date (indexed)"
+    query: |-
+      SELECT a.id, s.name AS severity, a.date FROM AccountAnomalyStar a JOIN DimSeverity s ON s.id = a.severityId WHERE a.companyId = {{Number 1 100}} AND a.severityId = {{Number 1 4}} ORDER BY a.date LIMIT 50
     repeat: 100
 
-  # --- Aggregation (no templates — GROUP BY touches all values anyway) ---
-  - name: "agg: GROUP BY severity (dim JOIN)"
-    query: "SELECT s.name AS severity, COUNT(*) AS cnt FROM AccountAnomalyStar a JOIN DimSeverity s ON s.id = a.severityId GROUP BY a.severityId"
+  - name: "ORDER BY: severity + amount (filesort)"
+    query: |-
+      SELECT a.id, s.name AS severity, a.amount FROM AccountAnomalyStar a JOIN DimSeverity s ON s.id = a.severityId WHERE a.companyId = {{Number 1 100}} AND a.severityId = {{Number 1 4}} ORDER BY a.amount LIMIT 50
     repeat: 100
+
+  - name: "ORDER BY: status + date (scan + filesort)"
+    query: |-
+      SELECT a.id, st.name AS status, a.date FROM AccountAnomalyStar a JOIN DimStatus st ON st.id = a.statusId WHERE a.companyId = {{Number 1 100}} AND a.statusId = {{Number 1 4}} ORDER BY a.date LIMIT 50
+    repeat: 100
+
+  - name: "join: severity + region"
+    query: |-
+      SELECT a.id, s.name AS severity, a.date, c.anomalyType FROM AccountAnomalyStar a JOIN DimSeverity s ON s.id = a.severityId JOIN AccountCheckStar c ON a.accountCheckId = c.id WHERE a.companyId = {{Number 1 100}} AND a.severityId = {{Number 1 4}} AND c.regionId = {{Number 1 4}}
+    repeat: 100
+
+  - name: "agg: GROUP BY severity"
+    query: |-
+      SELECT s.name AS severity, COUNT(*) AS cnt FROM AccountAnomalyStar a JOIN DimSeverity s ON s.id = a.severityId WHERE a.companyId = {{Number 1 100}} GROUP BY a.severityId
+    repeat: 100
+
   - name: "agg: filtered GROUP BY status"
-    query: "SELECT st.name AS status, COUNT(*), AVG(a.amount) FROM AccountAnomalyStar a JOIN DimStatus st ON st.id = a.statusId WHERE a.severityId = {{Number 1 4}} GROUP BY a.statusId"
+    query: |-
+      SELECT st.name AS status, COUNT(*), AVG(a.amount) FROM AccountAnomalyStar a JOIN DimStatus st ON st.id = a.statusId WHERE a.companyId = {{Number 1 100}} AND a.severityId = {{Number 1 4}} GROUP BY a.statusId
+    repeat: 100
+
+  # --- star-specific: dim JOIN overhead ---
+  - name: "star: bare filter (no JOINs)"
+    query: |-
+      SELECT a.id, a.severityId, a.date, a.statusId FROM AccountAnomalyStar a WHERE a.companyId = {{Number 1 100}} AND a.severityId = {{Number 1 4}}
     repeat: 100
