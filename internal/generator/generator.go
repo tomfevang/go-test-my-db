@@ -7,6 +7,7 @@ import (
 	"math/rand/v2"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"text/template"
 	"time"
 
@@ -17,24 +18,33 @@ import (
 
 // RowGenerator produces rows of fake data for a given table.
 type RowGenerator struct {
-	table      *introspect.Table
-	columns    []introspect.Column // columns we actually generate (excludes auto-inc)
-	generators []func() any
-	fkValues   map[string][]any // column name -> slice of valid FK values
-	uniqueSets map[int]map[any]bool
-	faker      *gofakeit.Faker
-	config     *config.Config
+	table            *introspect.Table
+	columns          []introspect.Column // columns we actually generate (excludes auto-inc)
+	generators       []func() any
+	fkValues         map[string][]any // column name -> slice of valid FK values
+	compositeUniques []*compositeUniqueTracker
+	faker            *gofakeit.Faker
+	config           *config.Config
+	sequences        map[string]*atomic.Int64 // column name -> sequence counter for non-auto-inc PKs
 }
 
 // NewRowGenerator creates a generator for the given table.
 // fkValues maps column name -> available parent IDs for FK columns.
-func NewRowGenerator(table *introspect.Table, fkValues map[string][]any, cfg *config.Config) *RowGenerator {
+// pkStartValues maps column name -> starting value for non-auto-inc integer PKs.
+func NewRowGenerator(table *introspect.Table, fkValues map[string][]any, cfg *config.Config, pkStartValues map[string]int64) *RowGenerator {
+	seqs := make(map[string]*atomic.Int64, len(pkStartValues))
+	for col, start := range pkStartValues {
+		seq := &atomic.Int64{}
+		seq.Store(start)
+		seqs[col] = seq
+	}
+
 	rg := &RowGenerator{
-		table:      table,
-		fkValues:   fkValues,
-		uniqueSets: make(map[int]map[any]bool),
-		faker:      gofakeit.New(0),
-		config:     cfg,
+		table:    table,
+		fkValues: fkValues,
+		faker:    gofakeit.New(0),
+		config:   cfg,
+		sequences: seqs,
 	}
 
 	for _, col := range table.Columns {
@@ -49,6 +59,9 @@ func NewRowGenerator(table *introspect.Table, fkValues map[string][]any, cfg *co
 		rg.generators[i] = rg.buildGenerator(col)
 	}
 
+	rg.buildCorrelationGenerators()
+	rg.initUniqueTracking()
+
 	return rg
 }
 
@@ -62,22 +75,51 @@ func (rg *RowGenerator) Columns() []string {
 }
 
 // GenerateRow produces a single row of fake data.
+// If composite unique constraints exist, it retries generation on collisions.
 func (rg *RowGenerator) GenerateRow() []any {
-	row := make([]any, len(rg.generators))
-	for i, gen := range rg.generators {
-		row[i] = gen()
+	for attempt := range maxUniqueRetries {
+		row := make([]any, len(rg.generators))
+		for i, gen := range rg.generators {
+			row[i] = gen()
+		}
+
+		if len(rg.compositeUniques) == 0 {
+			return row
+		}
+
+		if rg.checkCompositeUniques(row) {
+			rg.recordCompositeUniques(row)
+			return row
+		}
+		_ = attempt
 	}
-	return row
+	panic(fmt.Sprintf("unique constraint: exhausted %d retries for composite unique in table %s",
+		maxUniqueRetries, rg.table.Name))
 }
 
-// funcMap builds a template.FuncMap from the Faker instance, mirroring
-// gofakeit's internal templateFuncMap so we can pre-parse templates.
-func (rg *RowGenerator) funcMap() template.FuncMap {
+func (rg *RowGenerator) checkCompositeUniques(row []any) bool {
+	for _, ct := range rg.compositeUniques {
+		if !ct.check(row) {
+			return false
+		}
+	}
+	return true
+}
+
+func (rg *RowGenerator) recordCompositeUniques(row []any) {
+	for _, ct := range rg.compositeUniques {
+		ct.record(row)
+	}
+}
+
+// FuncMap builds a template.FuncMap from a Faker instance, exposing all
+// gofakeit methods plus helper functions for use in Go templates.
+func FuncMap(f *gofakeit.Faker) template.FuncMap {
 	fm := template.FuncMap{}
 
 	// Add all public Faker methods via reflection (same as gofakeit internals).
 	excluded := map[string]bool{"RandomMapKey": true, "SQL": true, "Template": true}
-	v := reflect.ValueOf(rg.faker)
+	v := reflect.ValueOf(f)
 	for i := 0; i < v.NumMethod(); i++ {
 		name := v.Type().Method(i).Name
 		if excluded[name] || v.Type().Method(i).Type.NumOut() == 0 {
@@ -105,20 +147,41 @@ func (rg *RowGenerator) funcMap() template.FuncMap {
 	return fm
 }
 
+func (rg *RowGenerator) funcMap() template.FuncMap {
+	return FuncMap(rg.faker)
+}
+
 func (rg *RowGenerator) buildGenerator(col introspect.Column) func() any {
-	// FK columns: pick a random value from the parent table.
+	// FK columns: pick a value from the parent table using distribution.
 	if col.FK != nil {
 		if vals, ok := rg.fkValues[col.Name]; ok && len(vals) > 0 {
+			dist := rg.config.GetDistribution(rg.table.Name, col.Name)
+			picker := NewValuePicker(vals, dist)
 			return func() any {
-				return vals[rand.IntN(len(vals))]
+				return picker.Pick()
 			}
 		}
 	}
 
-	// Enum/Set columns: random pick from parsed values.
+	// Non-auto-increment integer PKs: sequential values.
+	if col.IsPrimaryKey && !col.IsAutoInc && col.IsIntegerType() {
+		if seq, ok := rg.sequences[col.Name]; ok {
+			return func() any {
+				return seq.Add(1) - 1
+			}
+		}
+	}
+
+	// Enum/Set columns: pick using distribution.
 	if len(col.EnumValues) > 0 {
+		dist := rg.config.GetDistribution(rg.table.Name, col.Name)
+		enumVals := make([]any, len(col.EnumValues))
+		for i, v := range col.EnumValues {
+			enumVals[i] = v
+		}
+		picker := NewValuePicker(enumVals, dist)
 		return rg.wrapNullable(col, func() any {
-			return col.EnumValues[rand.IntN(len(col.EnumValues))]
+			return picker.Pick()
 		})
 	}
 

@@ -6,8 +6,26 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+type DistributionConfig struct {
+	Type    string             `yaml:"type"`    // zipf | normal | weighted (default: uniform)
+	S       float64            `yaml:"s"`       // zipf exponent
+	Mean    float64            `yaml:"mean"`    // normal mean (0-1, default 0.5)
+	StdDev  float64            `yaml:"stddev"`  // normal stddev (default 0.15)
+	Weights map[string]float64 `yaml:"weights"` // weighted: value -> weight
+}
+
+type CorrelationGroup struct {
+	Columns  []string          `yaml:"columns"`
+	Source   string            `yaml:"source"`   // built-in preset name or "template"
+	Template map[string]string `yaml:"template"` // column -> template string
+}
+
 type TableConfig struct {
-	Columns map[string]string `yaml:"columns"`
+	Rows           int                            `yaml:"rows"`
+	References     map[string]string              `yaml:"references"` // column -> "RefTable.RefColumn"
+	Columns        map[string]string              `yaml:"columns"`
+	Distributions  map[string]DistributionConfig  `yaml:"distributions"`
+	Correlations   []CorrelationGroup             `yaml:"correlations"`
 }
 
 type TestCase struct {
@@ -16,9 +34,26 @@ type TestCase struct {
 	Repeat int    `yaml:"repeat"` // <= 0 treated as 1
 }
 
+type ChildrenPerParent struct {
+	Min int `yaml:"min"`
+	Max int `yaml:"max"`
+}
+
+type Options struct {
+	DSN               string           `yaml:"dsn"`
+	Schema            string           `yaml:"schema"`
+	SeedTables        []string         `yaml:"seed_tables"`
+	Rows              int              `yaml:"rows"`
+	BatchSize         int              `yaml:"batch_size"`
+	Workers           int              `yaml:"workers"`
+	ChildrenPerParent ChildrenPerParent `yaml:"children_per_parent"`
+	MaxRows           int              `yaml:"max_rows"`
+}
+
 type Config struct {
-	Tables map[string]TableConfig `yaml:"tables"`
-	Tests  []TestCase             `yaml:"tests"`
+	Options Options                `yaml:"options"`
+	Tables  map[string]TableConfig `yaml:"tables"`
+	Tests   []TestCase             `yaml:"tests"`
 }
 
 // Load reads and parses a YAML config file.
@@ -62,6 +97,53 @@ func LoadOrDefault(path string) (*Config, error) {
 	}
 
 	return Load(defaultFile)
+}
+
+// GetReferences returns all configured references as
+// tableName -> columnName -> "RefTable.RefColumn".
+func (c *Config) GetReferences() map[string]map[string]string {
+	if c == nil {
+		return nil
+	}
+	refs := make(map[string]map[string]string)
+	for tableName, tc := range c.Tables {
+		if len(tc.References) > 0 {
+			refs[tableName] = tc.References
+		}
+	}
+	if len(refs) == 0 {
+		return nil
+	}
+	return refs
+}
+
+// GetDistribution returns the distribution config for a given table and column,
+// or nil if none is configured.
+func (c *Config) GetDistribution(table, column string) *DistributionConfig {
+	if c == nil {
+		return nil
+	}
+	tc, ok := c.Tables[table]
+	if !ok {
+		return nil
+	}
+	if d, ok := tc.Distributions[column]; ok {
+		return &d
+	}
+	return nil
+}
+
+// GetCorrelations returns the correlation groups for a given table,
+// or nil if none are configured.
+func (c *Config) GetCorrelations(table string) []CorrelationGroup {
+	if c == nil {
+		return nil
+	}
+	tc, ok := c.Tables[table]
+	if !ok {
+		return nil
+	}
+	return tc.Correlations
 }
 
 // GetTemplate returns the template string for a given table and column,

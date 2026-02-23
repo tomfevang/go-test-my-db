@@ -20,6 +20,7 @@ type Column struct {
 	IsAutoInc    bool
 	IsGenerated  bool
 	IsPrimaryKey bool
+	IsUnique     bool
 	MaxLength    *int64
 	Precision    *int64
 	Scale        *int64
@@ -28,9 +29,26 @@ type Column struct {
 	FK           *ForeignKey
 }
 
-type Table struct {
+// IsIntegerType returns true if the column's data type is an integer type.
+func (c Column) IsIntegerType() bool {
+	switch strings.ToLower(c.DataType) {
+	case "tinyint", "smallint", "mediumint", "int", "integer", "bigint":
+		return true
+	default:
+		return false
+	}
+}
+
+// UniqueIndex represents a unique index (excluding PRIMARY KEY).
+type UniqueIndex struct {
 	Name    string
-	Columns []Column
+	Columns []string
+}
+
+type Table struct {
+	Name          string
+	Columns       []Column
+	UniqueIndexes []UniqueIndex
 }
 
 var enumRegex = regexp.MustCompile(`'([^']*)'`)
@@ -85,7 +103,12 @@ func IntrospectTable(db *sql.DB, schema, tableName string) (*Table, error) {
 		}
 	}
 
-	return &Table{Name: tableName, Columns: columns}, nil
+	uniqueIdxs, err := introspectUniqueIndexes(db, schema, tableName)
+	if err != nil {
+		return nil, err
+	}
+
+	return &Table{Name: tableName, Columns: columns, UniqueIndexes: uniqueIdxs}, nil
 }
 
 func introspectColumns(db *sql.DB, schema, tableName string) ([]Column, error) {
@@ -123,6 +146,7 @@ func introspectColumns(db *sql.DB, schema, tableName string) ([]Column, error) {
 
 		col.IsNullable = isNullable == "YES"
 		col.IsPrimaryKey = colKey == "PRI"
+		col.IsUnique = colKey == "UNI"
 		col.IsAutoInc = strings.Contains(extra, "auto_increment")
 		col.IsGenerated = strings.Contains(extra, "GENERATED")
 
@@ -171,5 +195,69 @@ func introspectFKs(db *sql.DB, schema, tableName string) (map[string]*ForeignKey
 		}
 	}
 	return fks, rows.Err()
+}
+
+func introspectUniqueIndexes(db *sql.DB, schema, tableName string) ([]UniqueIndex, error) {
+	rows, err := db.Query(`
+		SELECT INDEX_NAME, COLUMN_NAME
+		FROM INFORMATION_SCHEMA.STATISTICS
+		WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?
+		  AND NON_UNIQUE = 0 AND INDEX_NAME != 'PRIMARY'
+		ORDER BY INDEX_NAME, SEQ_IN_INDEX`, schema, tableName)
+	if err != nil {
+		return nil, fmt.Errorf("introspecting unique indexes for %s: %w", tableName, err)
+	}
+	defer rows.Close()
+
+	indexMap := make(map[string][]string) // index name -> ordered columns
+	var indexOrder []string               // preserve discovery order
+	for rows.Next() {
+		var idxName, colName string
+		if err := rows.Scan(&idxName, &colName); err != nil {
+			return nil, fmt.Errorf("scanning unique index for %s: %w", tableName, err)
+		}
+		if _, seen := indexMap[idxName]; !seen {
+			indexOrder = append(indexOrder, idxName)
+		}
+		indexMap[idxName] = append(indexMap[idxName], colName)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	indexes := make([]UniqueIndex, 0, len(indexOrder))
+	for _, name := range indexOrder {
+		indexes = append(indexes, UniqueIndex{Name: name, Columns: indexMap[name]})
+	}
+	return indexes, nil
+}
+
+// ApplyReferences merges config-declared references into column metadata.
+// This allows columns without actual FK constraints to be treated as FK columns
+// for dependency ordering, value generation, and row count scaling.
+// refs maps "tableName" -> "columnName" -> "RefTable.RefColumn".
+func ApplyReferences(tables map[string]*Table, refs map[string]map[string]string) {
+	for tableName, colRefs := range refs {
+		t, ok := tables[tableName]
+		if !ok {
+			continue
+		}
+		for colName, ref := range colRefs {
+			parts := strings.SplitN(ref, ".", 2)
+			if len(parts) != 2 {
+				continue
+			}
+			refTable, refCol := parts[0], parts[1]
+			for i := range t.Columns {
+				if t.Columns[i].Name == colName {
+					t.Columns[i].FK = &ForeignKey{
+						ReferencedTable:  refTable,
+						ReferencedColumn: refCol,
+					}
+					break
+				}
+			}
+		}
+	}
 }
 
