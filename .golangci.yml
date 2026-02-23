@@ -8,7 +8,7 @@ linters:
     - unused
     - ineffassign
 
-linters-settings:
+settings:
   errcheck:
     exclude-functions:
       - (io.Closer).Close
