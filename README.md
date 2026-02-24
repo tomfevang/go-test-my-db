@@ -213,6 +213,20 @@ go-seed-my-db preview --dsn "..."
 | `--max-children` | 100 | Max children per parent |
 | `--max-rows` | 10,000,000 | Row cap |
 
+### `go-seed-my-db examples`
+
+Extract the bundled example schemas and configs to the current directory:
+
+```bash
+go-seed-my-db examples
+```
+
+This writes an `examples/` directory containing two schema designs (generated-columns and star-schema) with matching seed configs and a comparison config. See [`examples/README.md`](examples/README.md) for details.
+
+| Flag | Default | Description |
+|---|---|---|
+| `--force` | false | Overwrite existing files |
+
 ## Config file
 
 Place a `go-seed-my-db.yaml` in your working directory or pass `--config`. Use `go-seed-my-db init` to generate one from your schema.
@@ -291,7 +305,13 @@ Generate coherent data across multiple columns:
 
 ## Examples
 
-The [`examples/`](examples/) directory contains two complete schema designs with configs and benchmark queries:
+Extract the bundled examples, then try them out:
+
+```bash
+go-seed-my-db examples
+```
+
+This gives you two complete schema designs with configs and benchmark queries:
 
 - **Generated columns** — JSON fields with `STORED GENERATED` columns and indexes
 - **Star schema** — dimension tables with integer FK lookups
