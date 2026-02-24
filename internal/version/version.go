@@ -12,6 +12,10 @@ var (
 	date    = "unknown"
 )
 
+func Version() string {
+	return version
+}
+
 func BuildInfo() string {
 	return fmt.Sprintf("go-seed-my-db %s (commit: %s, built: %s, go: %s)",
 		version, commit, date, runtime.Version())
