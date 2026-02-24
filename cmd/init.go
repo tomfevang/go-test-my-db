@@ -105,7 +105,7 @@ func buildInitYAML(dsnVal string, tables []*introspect.Table) string {
 
 	// Options section.
 	sb.WriteString("options:\n")
-	sb.WriteString(fmt.Sprintf("  dsn: %q\n", redactDSNPassword(dsnVal)))
+	fmt.Fprintf(&sb, "  dsn: %q\n", redactDSNPassword(dsnVal))
 	sb.WriteString("  rows: 1000\n")
 	sb.WriteString("  batch_size: 1000\n")
 	sb.WriteString("  workers: 4\n")
@@ -114,7 +114,7 @@ func buildInitYAML(dsnVal string, tables []*introspect.Table) string {
 	// Tables section.
 	sb.WriteString("tables:\n")
 	for _, t := range tables {
-		sb.WriteString(fmt.Sprintf("  %s:\n", t.Name))
+		fmt.Fprintf(&sb, "  %s:\n", t.Name)
 		sb.WriteString("    # rows: 1000\n")
 
 		// Collect FK references.
