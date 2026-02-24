@@ -30,6 +30,7 @@ var (
 	maxChildren int
 	maxRows      int
 	dryRun       bool
+	deferIndexes bool
 	fkSampleSize int
 )
 
@@ -55,6 +56,7 @@ func init() {
 	rootCmd.Flags().IntVar(&maxChildren, "max-children", 100, "Max children per parent row for child tables")
 	rootCmd.Flags().IntVar(&maxRows, "max-rows", 10_000_000, "Maximum rows per table (safeguard for deep hierarchies)")
 	rootCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show what would be seeded without inserting any data")
+	rootCmd.Flags().BoolVar(&deferIndexes, "defer-indexes", false, "Drop secondary indexes before seeding and rebuild after (faster for large tables)")
 	rootCmd.Flags().IntVar(&fkSampleSize, "fk-sample-size", 500_000, "Max FK parent values to cache per column (0 = unlimited)")
 }
 
@@ -82,6 +84,9 @@ func runSeed(cmd *cobra.Command, args []string) error {
 	fkSampleSize = resolveInt(cmd, "fk-sample-size", fkSampleSize, cfg.Options.FKSampleSize, 500_000)
 	if !cmd.Flags().Changed("load-data") && cfg.Options.LoadData {
 		loadData = true
+	}
+	if !cmd.Flags().Changed("defer-indexes") && cfg.Options.DeferIndexes {
+		deferIndexes = true
 	}
 
 	if dsn == "" {
@@ -205,6 +210,7 @@ func runSeed(cmd *cobra.Command, args []string) error {
 		Workers:      workers,
 		Clear:        clear,
 		LoadData:     loadData,
+		DeferIndexes: deferIndexes,
 		GenConfig:    cfg,
 		FKSampleSize: fkSampleSize,
 	}); err != nil {

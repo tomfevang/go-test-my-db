@@ -39,8 +39,9 @@ var (
 	testAI          bool
 	testMinChildren int
 	testMaxChildren int
-	testMaxRows     int
-	testLoadData    bool
+	testMaxRows      int
+	testLoadData     bool
+	testDeferIndexes bool
 )
 
 var testCmd = &cobra.Command{
@@ -65,6 +66,7 @@ func init() {
 	testCmd.Flags().IntVar(&testMaxChildren, "max-children", 100, "Max children per parent row for child tables")
 	testCmd.Flags().IntVar(&testMaxRows, "max-rows", 10_000_000, "Maximum rows per table (safeguard for deep hierarchies)")
 	testCmd.Flags().BoolVar(&testLoadData, "load-data", false, "Use LOAD DATA LOCAL INFILE for faster bulk loading (requires server local_infile=ON)")
+	testCmd.Flags().BoolVar(&testDeferIndexes, "defer-indexes", false, "Drop secondary indexes before seeding and rebuild after (faster for large tables)")
 
 	rootCmd.AddCommand(testCmd)
 }
@@ -96,6 +98,9 @@ func runTest(cmd *cobra.Command, args []string) error {
 	testMaxRows = resolveInt(cmd, "max-rows", testMaxRows, cfg.Options.MaxRows, 10_000_000)
 	if !cmd.Flags().Changed("load-data") && cfg.Options.LoadData {
 		testLoadData = true
+	}
+	if !cmd.Flags().Changed("defer-indexes") && cfg.Options.DeferIndexes {
+		testDeferIndexes = true
 	}
 
 	if testDSN == "" {
@@ -135,7 +140,7 @@ func runTest(cmd *cobra.Command, args []string) error {
 	}
 
 	// Run the pipeline: create → seed → test → drop.
-	results, _, err := runTestPipeline(db, schema, cfg, testSchemaFile, testRows, testBatchSize, testWorkers, testMinChildren, testMaxChildren, testMaxRows, testLoadData, seedTables)
+	results, _, err := runTestPipeline(db, schema, cfg, testSchemaFile, testRows, testBatchSize, testWorkers, testMinChildren, testMaxChildren, testMaxRows, testLoadData, testDeferIndexes, seedTables)
 	if err != nil {
 		return err
 	}

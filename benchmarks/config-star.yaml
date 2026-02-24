@@ -1,5 +1,6 @@
 options:
   schema: "benchmarks/schema-star.sql"
+  defer_indexes: true
   seed_tables:
     - BenchCompany
     - AccountCheckStar
@@ -7,12 +8,12 @@ options:
 
 tables:
   BenchCompany:
-    rows: 100
+    rows: 2000
     columns:
       name: "{{Company}}"
 
   AccountCheckStar:
-    rows: 50000
+    rows: 1000000
     references:
       companyId: BenchCompany.id
     columns:
@@ -22,7 +23,7 @@ tables:
       sourceId: "{{Number 1 3}}"
 
   AccountAnomalyStar:
-    rows: 500000
+    rows: 10000000
     references:
       accountCheckId: AccountCheckStar.id
       companyId: BenchCompany.id
@@ -38,61 +39,61 @@ tests:
 
   - name: "company + severity"
     query: |-
-      SELECT a.id, s.name AS severity, a.date, st.name AS status FROM AccountAnomalyStar a JOIN DimSeverity s ON s.id = a.severityId JOIN DimStatus st ON st.id = a.statusId WHERE a.companyId = {{Number 1 100}} AND a.severityId = {{Number 1 4}}
+      SELECT a.id, s.name AS severity, a.date, st.name AS status FROM AccountAnomalyStar a JOIN DimSeverity s ON s.id = a.severityId JOIN DimStatus st ON st.id = a.statusId WHERE a.companyId = {{Number 1 2000}} AND a.severityId = {{Number 1 4}}
     repeat: 100
 
   - name: "company + severity + date"
     query: |-
-      SELECT a.id, s.name AS severity, a.date, st.name AS status FROM AccountAnomalyStar a JOIN DimSeverity s ON s.id = a.severityId JOIN DimStatus st ON st.id = a.statusId WHERE a.companyId = {{Number 1 100}} AND a.severityId = {{Number 1 4}} AND a.date >= '2024-01-01'
+      SELECT a.id, s.name AS severity, a.date, st.name AS status FROM AccountAnomalyStar a JOIN DimSeverity s ON s.id = a.severityId JOIN DimStatus st ON st.id = a.statusId WHERE a.companyId = {{Number 1 2000}} AND a.severityId = {{Number 1 4}} AND a.date >= '2024-01-01'
     repeat: 100
 
   - name: "company + severity + status + date"
     query: |-
-      SELECT a.id, s.name AS severity, a.date, st.name AS status FROM AccountAnomalyStar a JOIN DimSeverity s ON s.id = a.severityId JOIN DimStatus st ON st.id = a.statusId WHERE a.companyId = {{Number 1 100}} AND a.severityId = {{Number 1 4}} AND a.statusId = {{Number 1 4}} AND a.date >= '2024-01-01'
+      SELECT a.id, s.name AS severity, a.date, st.name AS status FROM AccountAnomalyStar a JOIN DimSeverity s ON s.id = a.severityId JOIN DimStatus st ON st.id = a.statusId WHERE a.companyId = {{Number 1 2000}} AND a.severityId = {{Number 1 4}} AND a.statusId = {{Number 1 4}} AND a.date >= '2024-01-01'
     repeat: 100
 
   - name: "company + amount range"
     query: |-
-      SELECT a.id, a.amount, st.name AS status FROM AccountAnomalyStar a JOIN DimStatus st ON st.id = a.statusId WHERE a.companyId = {{Number 1 100}} AND a.amount > 90
+      SELECT a.id, a.amount, st.name AS status FROM AccountAnomalyStar a JOIN DimStatus st ON st.id = a.statusId WHERE a.companyId = {{Number 1 2000}} AND a.amount > 90
     repeat: 100
 
   - name: "company + status + amount"
     query: |-
-      SELECT a.id, s.name AS severity, a.amount, st.name AS status FROM AccountAnomalyStar a JOIN DimSeverity s ON s.id = a.severityId JOIN DimStatus st ON st.id = a.statusId WHERE a.companyId = {{Number 1 100}} AND a.statusId = {{Number 1 4}} AND a.amount > 90
+      SELECT a.id, s.name AS severity, a.amount, st.name AS status FROM AccountAnomalyStar a JOIN DimSeverity s ON s.id = a.severityId JOIN DimStatus st ON st.id = a.statusId WHERE a.companyId = {{Number 1 2000}} AND a.statusId = {{Number 1 4}} AND a.amount > 90
     repeat: 100
 
   - name: "ORDER BY: severity + date (indexed)"
     query: |-
-      SELECT a.id, s.name AS severity, a.date FROM AccountAnomalyStar a JOIN DimSeverity s ON s.id = a.severityId WHERE a.companyId = {{Number 1 100}} AND a.severityId = {{Number 1 4}} ORDER BY a.date LIMIT 50
+      SELECT a.id, s.name AS severity, a.date FROM AccountAnomalyStar a JOIN DimSeverity s ON s.id = a.severityId WHERE a.companyId = {{Number 1 2000}} AND a.severityId = {{Number 1 4}} ORDER BY a.date LIMIT 50
     repeat: 100
 
   - name: "ORDER BY: severity + amount (filesort)"
     query: |-
-      SELECT a.id, s.name AS severity, a.amount FROM AccountAnomalyStar a JOIN DimSeverity s ON s.id = a.severityId WHERE a.companyId = {{Number 1 100}} AND a.severityId = {{Number 1 4}} ORDER BY a.amount LIMIT 50
+      SELECT a.id, s.name AS severity, a.amount FROM AccountAnomalyStar a JOIN DimSeverity s ON s.id = a.severityId WHERE a.companyId = {{Number 1 2000}} AND a.severityId = {{Number 1 4}} ORDER BY a.amount LIMIT 50
     repeat: 100
 
   - name: "ORDER BY: status + date (scan + filesort)"
     query: |-
-      SELECT a.id, st.name AS status, a.date FROM AccountAnomalyStar a JOIN DimStatus st ON st.id = a.statusId WHERE a.companyId = {{Number 1 100}} AND a.statusId = {{Number 1 4}} ORDER BY a.date LIMIT 50
+      SELECT a.id, st.name AS status, a.date FROM AccountAnomalyStar a JOIN DimStatus st ON st.id = a.statusId WHERE a.companyId = {{Number 1 2000}} AND a.statusId = {{Number 1 4}} ORDER BY a.date LIMIT 50
     repeat: 100
 
   - name: "join: severity + region"
     query: |-
-      SELECT a.id, s.name AS severity, a.date, c.anomalyType FROM AccountAnomalyStar a JOIN DimSeverity s ON s.id = a.severityId JOIN AccountCheckStar c ON a.accountCheckId = c.id WHERE a.companyId = {{Number 1 100}} AND a.severityId = {{Number 1 4}} AND c.regionId = {{Number 1 4}}
+      SELECT a.id, s.name AS severity, a.date, c.anomalyType FROM AccountAnomalyStar a JOIN DimSeverity s ON s.id = a.severityId JOIN AccountCheckStar c ON a.accountCheckId = c.id WHERE a.companyId = {{Number 1 2000}} AND a.severityId = {{Number 1 4}} AND c.regionId = {{Number 1 4}}
     repeat: 100
 
   - name: "agg: GROUP BY severity"
     query: |-
-      SELECT s.name AS severity, COUNT(*) AS cnt FROM AccountAnomalyStar a JOIN DimSeverity s ON s.id = a.severityId WHERE a.companyId = {{Number 1 100}} GROUP BY a.severityId
+      SELECT s.name AS severity, COUNT(*) AS cnt FROM AccountAnomalyStar a JOIN DimSeverity s ON s.id = a.severityId WHERE a.companyId = {{Number 1 2000}} GROUP BY a.severityId
     repeat: 100
 
   - name: "agg: filtered GROUP BY status"
     query: |-
-      SELECT st.name AS status, COUNT(*), AVG(a.amount) FROM AccountAnomalyStar a JOIN DimStatus st ON st.id = a.statusId WHERE a.companyId = {{Number 1 100}} AND a.severityId = {{Number 1 4}} GROUP BY a.statusId
+      SELECT st.name AS status, COUNT(*), AVG(a.amount) FROM AccountAnomalyStar a JOIN DimStatus st ON st.id = a.statusId WHERE a.companyId = {{Number 1 2000}} AND a.severityId = {{Number 1 4}} GROUP BY a.statusId
     repeat: 100
 
   # --- star-specific: dim JOIN overhead ---
   - name: "star: bare filter (no JOINs)"
     query: |-
-      SELECT a.id, a.severityId, a.date, a.statusId FROM AccountAnomalyStar a WHERE a.companyId = {{Number 1 100}} AND a.severityId = {{Number 1 4}}
+      SELECT a.id, a.severityId, a.date, a.statusId FROM AccountAnomalyStar a WHERE a.companyId = {{Number 1 2000}} AND a.severityId = {{Number 1 4}}
     repeat: 100

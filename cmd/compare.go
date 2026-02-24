@@ -26,6 +26,7 @@ var (
 	compareMinChildren int
 	compareMaxChildren int
 	compareMaxRows     int
+	compareDeferIndexes bool
 )
 
 var compareCmd = &cobra.Command{
@@ -57,6 +58,7 @@ func init() {
 	compareCmd.Flags().IntVar(&compareMinChildren, "min-children", 0, "Override min children per parent row (0 = use each config's value)")
 	compareCmd.Flags().IntVar(&compareMaxChildren, "max-children", 0, "Override max children per parent row (0 = use each config's value)")
 	compareCmd.Flags().IntVar(&compareMaxRows, "max-rows", 0, "Override max rows per table (0 = use each config's value)")
+	compareCmd.Flags().BoolVar(&compareDeferIndexes, "defer-indexes", false, "Drop secondary indexes before seeding and rebuild after (overrides all configs)")
 
 	rootCmd.AddCommand(compareCmd)
 }
@@ -178,7 +180,8 @@ func executeComparison(cmd *cobra.Command, entries []compareEntry) error {
 		fmt.Printf("[%d/%d] Running: %s (%s, %d base rows)...\n", i+1, total, e.label, schemaFile, rows)
 		start := time.Now()
 
-		testResults, tableCount, err := runTestPipeline(db, schema, e.cfg, schemaFile, rows, batchSize, workers, minC, maxC, maxR, e.cfg.Options.LoadData, e.cfg.Options.SeedTables)
+		deferIdx := e.cfg.Options.DeferIndexes || compareDeferIndexes
+		testResults, tableCount, err := runTestPipeline(db, schema, e.cfg, schemaFile, rows, batchSize, workers, minC, maxC, maxR, e.cfg.Options.LoadData, deferIdx, e.cfg.Options.SeedTables)
 		duration := time.Since(start)
 
 		results[i] = ConfigResult{

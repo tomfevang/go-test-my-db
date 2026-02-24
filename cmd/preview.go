@@ -28,7 +28,8 @@ var (
 	previewMinChildren int
 	previewMaxChildren int
 	previewMaxRows     int
-	previewLoadData    bool
+	previewLoadData     bool
+	previewDeferIndexes bool
 )
 
 var previewCmd = &cobra.Command{
@@ -63,6 +64,7 @@ func init() {
 	previewCmd.Flags().IntVar(&previewMaxChildren, "max-children", 100, "Max children per parent row for child tables")
 	previewCmd.Flags().IntVar(&previewMaxRows, "max-rows", 10_000_000, "Maximum rows per table")
 	previewCmd.Flags().BoolVar(&previewLoadData, "load-data", false, "Use LOAD DATA LOCAL INFILE for faster bulk loading (requires server local_infile=ON)")
+	previewCmd.Flags().BoolVar(&previewDeferIndexes, "defer-indexes", false, "Drop secondary indexes before seeding and rebuild after (faster for large tables)")
 
 	rootCmd.AddCommand(previewCmd)
 }
@@ -85,6 +87,9 @@ func runPreview(cmd *cobra.Command, args []string) error {
 	previewMaxRows = resolveInt(cmd, "max-rows", previewMaxRows, cfg.Options.MaxRows, 10_000_000)
 	if !cmd.Flags().Changed("load-data") && cfg.Options.LoadData {
 		previewLoadData = true
+	}
+	if !cmd.Flags().Changed("defer-indexes") && cfg.Options.DeferIndexes {
+		previewDeferIndexes = true
 	}
 
 	if previewDSN == "" {
@@ -205,6 +210,7 @@ func runPreviewWithSchema(db *sql.DB, schema string, cfg *config.Config) error {
 		Workers:      previewWorkers,
 		Clear:        false,
 		LoadData:     previewLoadData,
+		DeferIndexes: previewDeferIndexes,
 		GenConfig:    cfg,
 	}); err != nil {
 		return fmt.Errorf("seeding tables: %w", err)

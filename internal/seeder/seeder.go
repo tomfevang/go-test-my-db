@@ -57,6 +57,7 @@ type Config struct {
 	Workers      int
 	Clear        bool
 	LoadData     bool
+	DeferIndexes bool
 	GenConfig    *config.Config
 	FKSampleSize int // max FK values to cache per column; 0 = unlimited
 }
@@ -119,6 +120,22 @@ func SeedAll(cfg Config) error {
 			cfg.RowsPerTable[table.Name] = targetRows - currentCount
 		}
 
+		// Optionally drop secondary indexes before bulk insert.
+		var droppedIndexes []SecondaryIndex
+		if cfg.DeferIndexes {
+			idxs, err := fetchSecondaryIndexes(cfg.DB, cfg.Schema, table.Name)
+			if err != nil {
+				return fmt.Errorf("fetching indexes for %s: %w", table.Name, err)
+			}
+			if len(idxs) > 0 {
+				fmt.Printf("[%s] dropping %d secondary indexes...\n", table.Name, len(idxs))
+				if err := dropSecondaryIndexes(cfg.DB, table.Name, idxs); err != nil {
+					return err
+				}
+				droppedIndexes = idxs
+			}
+		}
+
 		// Build FK value map for this table's columns.
 		tableFKValues := make(map[string][]any)
 		for _, col := range table.Columns {
@@ -147,11 +164,29 @@ func SeedAll(cfg Config) error {
 
 		if cfg.LoadData {
 			if err := seedTableLoadData(cfg, table, tableFKValues, existingUniques, existingComposites); err != nil {
+				// Restore indexes even on seed failure.
+				if len(droppedIndexes) > 0 {
+					fmt.Printf("[%s] restoring %d secondary indexes after error...\n", table.Name, len(droppedIndexes))
+					_ = restoreSecondaryIndexes(cfg.DB, table.Name, droppedIndexes)
+				}
 				return fmt.Errorf("seeding %s: %w", table.Name, err)
 			}
 		} else {
 			if err := seedTable(cfg, table, tableFKValues, existingUniques, existingComposites); err != nil {
+				// Restore indexes even on seed failure.
+				if len(droppedIndexes) > 0 {
+					fmt.Printf("[%s] restoring %d secondary indexes after error...\n", table.Name, len(droppedIndexes))
+					_ = restoreSecondaryIndexes(cfg.DB, table.Name, droppedIndexes)
+				}
 				return fmt.Errorf("seeding %s: %w", table.Name, err)
+			}
+		}
+
+		// Restore secondary indexes after bulk insert.
+		if len(droppedIndexes) > 0 {
+			fmt.Printf("[%s] restoring %d secondary indexes...\n", table.Name, len(droppedIndexes))
+			if err := restoreSecondaryIndexes(cfg.DB, table.Name, droppedIndexes); err != nil {
+				return err
 			}
 		}
 
