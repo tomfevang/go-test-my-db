@@ -27,7 +27,9 @@ tests:
       alpha: "SELECT 3"
 `
 	configPath := filepath.Join(dir, "compare.yaml")
-	os.WriteFile(configPath, []byte(content), 0644)
+	if err := os.WriteFile(configPath, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	cc, err := LoadCompare(configPath)
 	if err != nil {
@@ -70,7 +72,9 @@ func TestLoadCompare_AbsolutePaths(t *testing.T) {
     file: /absolute/path/seed.yaml
 `
 	configPath := filepath.Join(dir, "compare.yaml")
-	os.WriteFile(configPath, []byte(content), 0644)
+	if err := os.WriteFile(configPath, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	cc, err := LoadCompare(configPath)
 	if err != nil {
@@ -93,7 +97,9 @@ func TestLoadCompare_DuplicateLabel(t *testing.T) {
     file: b.yaml
 `
 	configPath := filepath.Join(dir, "compare.yaml")
-	os.WriteFile(configPath, []byte(content), 0644)
+	if err := os.WriteFile(configPath, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	_, err := LoadCompare(configPath)
 	if err == nil {
@@ -109,7 +115,9 @@ func TestLoadCompare_EmptyLabel(t *testing.T) {
     file: a.yaml
 `
 	configPath := filepath.Join(dir, "compare.yaml")
-	os.WriteFile(configPath, []byte(content), 0644)
+	if err := os.WriteFile(configPath, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	_, err := LoadCompare(configPath)
 	if err == nil {
@@ -131,7 +139,9 @@ tests:
       typo: "SELECT 2"
 `
 	configPath := filepath.Join(dir, "compare.yaml")
-	os.WriteFile(configPath, []byte(content), 0644)
+	if err := os.WriteFile(configPath, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	_, err := LoadCompare(configPath)
 	if err == nil {
@@ -146,7 +156,9 @@ func TestLoadCompare_NoConfigs(t *testing.T) {
 tests: []
 `
 	configPath := filepath.Join(dir, "compare.yaml")
-	os.WriteFile(configPath, []byte(content), 0644)
+	if err := os.WriteFile(configPath, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	_, err := LoadCompare(configPath)
 	if err == nil {
@@ -158,10 +170,14 @@ func TestIsCompareConfig(t *testing.T) {
 	dir := t.TempDir()
 
 	comparePath := filepath.Join(dir, "compare.yaml")
-	os.WriteFile(comparePath, []byte("configs:\n  - label: x\n    file: y.yaml\n"), 0644)
+	if err := os.WriteFile(comparePath, []byte("configs:\n  - label: x\n    file: y.yaml\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	seedPath := filepath.Join(dir, "seed.yaml")
-	os.WriteFile(seedPath, []byte("options:\n  schema: s.sql\ntables: {}\n"), 0644)
+	if err := os.WriteFile(seedPath, []byte("options:\n  schema: s.sql\ntables: {}\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
 
 	if !IsCompareConfig(comparePath) {
 		t.Error("expected true for comparison config")
