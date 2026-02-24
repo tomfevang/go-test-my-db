@@ -25,8 +25,10 @@ var (
 	compareAI          bool
 	compareMinChildren int
 	compareMaxChildren int
-	compareMaxRows     int
+	compareMaxRows      int
+	compareLoadData     bool
 	compareDeferIndexes bool
+	compareFKSampleSize int
 )
 
 var compareCmd = &cobra.Command{
@@ -58,7 +60,9 @@ func init() {
 	compareCmd.Flags().IntVar(&compareMinChildren, "min-children", 0, "Override min children per parent row (0 = use each config's value)")
 	compareCmd.Flags().IntVar(&compareMaxChildren, "max-children", 0, "Override max children per parent row (0 = use each config's value)")
 	compareCmd.Flags().IntVar(&compareMaxRows, "max-rows", 0, "Override max rows per table (0 = use each config's value)")
+	compareCmd.Flags().BoolVar(&compareLoadData, "load-data", false, "Use LOAD DATA LOCAL INFILE for faster bulk loading (overrides all configs)")
 	compareCmd.Flags().BoolVar(&compareDeferIndexes, "defer-indexes", false, "Drop secondary indexes before seeding and rebuild after (overrides all configs)")
+	compareCmd.Flags().IntVar(&compareFKSampleSize, "fk-sample-size", 0, "Override max FK parent values to cache per column (0 = use each config's value)")
 
 	rootCmd.AddCommand(compareCmd)
 }
@@ -180,8 +184,10 @@ func executeComparison(cmd *cobra.Command, entries []compareEntry) error {
 		fmt.Printf("[%d/%d] Running: %s (%s, %d base rows)...\n", i+1, total, e.label, schemaFile, rows)
 		start := time.Now()
 
+		loadData := e.cfg.Options.LoadData || compareLoadData
 		deferIdx := e.cfg.Options.DeferIndexes || compareDeferIndexes
-		testResults, tableCount, err := runTestPipeline(db, schema, e.cfg, schemaFile, rows, batchSize, workers, minC, maxC, maxR, e.cfg.Options.LoadData, deferIdx, e.cfg.Options.SeedTables)
+		fkSample := resolveOverride(compareFKSampleSize, e.cfg.Options.FKSampleSize, 500_000)
+		testResults, tableCount, err := runTestPipeline(db, schema, e.cfg, schemaFile, rows, batchSize, workers, minC, maxC, maxR, loadData, deferIdx, fkSample, e.cfg.Options.SeedTables)
 		duration := time.Since(start)
 
 		results[i] = ConfigResult{

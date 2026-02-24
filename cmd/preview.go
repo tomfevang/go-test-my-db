@@ -30,6 +30,7 @@ var (
 	previewMaxRows     int
 	previewLoadData     bool
 	previewDeferIndexes bool
+	previewFKSampleSize int
 )
 
 var previewCmd = &cobra.Command{
@@ -65,6 +66,7 @@ func init() {
 	previewCmd.Flags().IntVar(&previewMaxRows, "max-rows", 10_000_000, "Maximum rows per table")
 	previewCmd.Flags().BoolVar(&previewLoadData, "load-data", false, "Use LOAD DATA LOCAL INFILE for faster bulk loading (requires server local_infile=ON)")
 	previewCmd.Flags().BoolVar(&previewDeferIndexes, "defer-indexes", false, "Drop secondary indexes before seeding and rebuild after (faster for large tables)")
+	previewCmd.Flags().IntVar(&previewFKSampleSize, "fk-sample-size", 500_000, "Max FK parent values to cache per column (0 = unlimited)")
 
 	rootCmd.AddCommand(previewCmd)
 }
@@ -91,6 +93,7 @@ func runPreview(cmd *cobra.Command, args []string) error {
 	if !cmd.Flags().Changed("defer-indexes") && cfg.Options.DeferIndexes {
 		previewDeferIndexes = true
 	}
+	previewFKSampleSize = resolveInt(cmd, "fk-sample-size", previewFKSampleSize, cfg.Options.FKSampleSize, 500_000)
 
 	if previewDSN == "" {
 		return fmt.Errorf("DSN is required — set via --dsn flag, SEED_DSN env var, or options.dsn in config file")
@@ -212,6 +215,7 @@ func runPreviewWithSchema(db *sql.DB, schema string, cfg *config.Config) error {
 		LoadData:     previewLoadData,
 		DeferIndexes: previewDeferIndexes,
 		GenConfig:    cfg,
+		FKSampleSize: previewFKSampleSize,
 	}); err != nil {
 		return fmt.Errorf("seeding tables: %w", err)
 	}

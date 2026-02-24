@@ -42,6 +42,7 @@ var (
 	testMaxRows      int
 	testLoadData     bool
 	testDeferIndexes bool
+	testFKSampleSize int
 )
 
 var testCmd = &cobra.Command{
@@ -67,6 +68,7 @@ func init() {
 	testCmd.Flags().IntVar(&testMaxRows, "max-rows", 10_000_000, "Maximum rows per table (safeguard for deep hierarchies)")
 	testCmd.Flags().BoolVar(&testLoadData, "load-data", false, "Use LOAD DATA LOCAL INFILE for faster bulk loading (requires server local_infile=ON)")
 	testCmd.Flags().BoolVar(&testDeferIndexes, "defer-indexes", false, "Drop secondary indexes before seeding and rebuild after (faster for large tables)")
+	testCmd.Flags().IntVar(&testFKSampleSize, "fk-sample-size", 500_000, "Max FK parent values to cache per column (0 = unlimited)")
 
 	rootCmd.AddCommand(testCmd)
 }
@@ -102,6 +104,7 @@ func runTest(cmd *cobra.Command, args []string) error {
 	if !cmd.Flags().Changed("defer-indexes") && cfg.Options.DeferIndexes {
 		testDeferIndexes = true
 	}
+	testFKSampleSize = resolveInt(cmd, "fk-sample-size", testFKSampleSize, cfg.Options.FKSampleSize, 500_000)
 
 	if testDSN == "" {
 		return fmt.Errorf("DSN is required — set via --dsn flag, SEED_DSN env var, or options.dsn in config file")
@@ -140,7 +143,7 @@ func runTest(cmd *cobra.Command, args []string) error {
 	}
 
 	// Run the pipeline: create → seed → test → drop.
-	results, _, err := runTestPipeline(db, schema, cfg, testSchemaFile, testRows, testBatchSize, testWorkers, testMinChildren, testMaxChildren, testMaxRows, testLoadData, testDeferIndexes, seedTables)
+	results, _, err := runTestPipeline(db, schema, cfg, testSchemaFile, testRows, testBatchSize, testWorkers, testMinChildren, testMaxChildren, testMaxRows, testLoadData, testDeferIndexes, testFKSampleSize, seedTables)
 	if err != nil {
 		return err
 	}
