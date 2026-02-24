@@ -1,5 +1,5 @@
 options:
-  schema: "benchmarks/schema.sql"
+  schema: "examples/schema.sql"
   defer_indexes: true
 
 tables:

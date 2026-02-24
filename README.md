@@ -85,6 +85,7 @@ go-seed-my-db --dsn "..." --rows 100000 --dry-run
 | `--clear` | false | Truncate tables before seeding |
 | `--config` | auto-detect | Path to config YAML |
 | `--load-data` | false | Use `LOAD DATA LOCAL INFILE` for faster bulk loading |
+| `--defer-indexes` | false | Drop secondary indexes before seeding and rebuild after |
 | `--dry-run` | false | Print seeding plan without inserting |
 | `--min-children` | 10 | Min child rows per parent row |
 | `--max-children` | 100 | Max child rows per parent row |
@@ -134,6 +135,8 @@ Results include avg, min, max, and p95 latency per query. Add `--ai` to pipe res
 | `--table` | all schema tables | Tables to seed (repeatable) |
 | `--ai` | false | Pipe results to Claude for AI analysis |
 | `--load-data` | false | Use LOAD DATA mode |
+| `--defer-indexes` | false | Drop secondary indexes before seeding and rebuild after |
+| `--fk-sample-size` | 500,000 | Max FK parent values cached per column (0 = unlimited) |
 | `--min-children` | 10 | Min children per parent |
 | `--max-children` | 100 | Max children per parent |
 | `--max-rows` | 10,000,000 | Row cap |
@@ -171,7 +174,15 @@ tests:
 |---|---|---|
 | `--dsn` | *(required)* | MySQL DSN (shared across configs) |
 | `--rows` | 0 | Override rows for all configs |
+| `--batch-size` | 0 | Override batch size for all configs |
+| `--workers` | 0 | Override worker count for all configs |
 | `--ai` | false | Pipe comparison report to Claude |
+| `--load-data` | false | Use LOAD DATA mode (overrides all configs) |
+| `--defer-indexes` | false | Drop secondary indexes before seeding and rebuild after |
+| `--fk-sample-size` | 0 | Override max FK parent values cached per column |
+| `--min-children` | 0 | Override min children per parent |
+| `--max-children` | 0 | Override max children per parent |
+| `--max-rows` | 0 | Override max rows per table |
 
 ### `go-seed-my-db preview`
 
@@ -187,7 +198,20 @@ go-seed-my-db preview --dsn "..."
 
 | Flag | Default | Description |
 |---|---|---|
+| `--dsn` | *(required)* | MySQL DSN |
+| `--schema` | | Path to SQL DDL file (creates temporary tables) |
+| `--config` | auto-detect | Config YAML path |
+| `--table` | all tables | Table(s) to preview (repeatable) |
 | `--sample-rows` | 5 | Number of sample rows to display per table |
+| `--rows` | 1000 | Base row count for root tables |
+| `--batch-size` | 1000 | Rows per INSERT |
+| `--workers` | 4 | Insert workers |
+| `--load-data` | false | Use LOAD DATA mode |
+| `--defer-indexes` | false | Drop secondary indexes before seeding and rebuild after |
+| `--fk-sample-size` | 500,000 | Max FK parent values cached per column (0 = unlimited) |
+| `--min-children` | 10 | Min children per parent |
+| `--max-children` | 100 | Max children per parent |
+| `--max-rows` | 10,000,000 | Row cap |
 
 ## Config file
 
@@ -202,6 +226,7 @@ options:
   batch_size: 5000
   workers: 8
   load_data: false
+  defer_indexes: false
   fk_sample_size: 500000
   max_rows: 10000000
   children_per_parent:
@@ -263,6 +288,30 @@ Generate coherent data across multiple columns:
 | `person` | First name, last name, email from the same person |
 | `latlong` | Latitude and longitude from the same location |
 | `template` | Custom templates where columns can reference each other |
+
+## Examples
+
+The [`examples/`](examples/) directory contains two complete schema designs with configs and benchmark queries:
+
+- **Generated columns** — JSON fields with `STORED GENERATED` columns and indexes
+- **Star schema** — dimension tables with integer FK lookups
+
+Run one individually with `test`:
+
+```bash
+go-seed-my-db test \
+  --dsn "user:pass@tcp(localhost:3306)/mydb" \
+  --schema examples/schema.sql \
+  --config examples/config-generated.yaml
+```
+
+Or compare both side by side:
+
+```bash
+go-seed-my-db compare --dsn "..." examples/comparison.yaml
+```
+
+See [`examples/README.md`](examples/README.md) for details.
 
 ## Contributing
 

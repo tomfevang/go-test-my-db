@@ -1,5 +1,5 @@
 options:
-  schema: "benchmarks/schema-star.sql"
+  schema: "examples/schema-star.sql"
   defer_indexes: true
   seed_tables:
     - BenchCompany
