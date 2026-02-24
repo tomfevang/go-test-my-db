@@ -324,21 +324,27 @@ func printReport(results []TestResult) {
 		thresholds = avgTerciles(results)
 	}
 
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	// Write plain text to a buffer so ANSI codes don't break tabwriter alignment.
+	var buf bytes.Buffer
+	w := tabwriter.NewWriter(&buf, 0, 0, 2, ' ', 0)
 	fmt.Fprintf(w, "  Test\tAvg\tMin\tMax\tp95\tRows\tRuns\n")
 	fmt.Fprintf(w, "  ----\t---\t---\t---\t---\t----\t----\n")
 
+	// Track per-result-line colors (indices match result lines, not header/separator).
+	lineColors := make([]string, 0, len(results))
+
 	for _, r := range results {
 		if r.Error != nil {
-			line := fmt.Sprintf("  %s\tERROR: %v\t\t\t\t\t", r.Name, r.Error)
+			fmt.Fprintf(w, "  %s\tERROR: %v\t\t\t\t\t\n", r.Name, r.Error)
 			if useColor {
-				line = colorRed + line + colorReset
+				lineColors = append(lineColors, colorRed)
+			} else {
+				lineColors = append(lineColors, "")
 			}
-			fmt.Fprintln(w, line)
 			continue
 		}
 
-		line := fmt.Sprintf("  %s\t%s\t%s\t%s\t%s\t%d\t%d",
+		fmt.Fprintf(w, "  %s\t%s\t%s\t%s\t%s\t%d\t%d\n",
 			r.Name,
 			formatDuration(avg(r.Timings)),
 			formatDuration(min(r.Timings)),
@@ -352,17 +358,32 @@ func printReport(results []TestResult) {
 			a := avg(r.Timings)
 			switch {
 			case a <= thresholds[0]:
-				line = colorGreen + line + colorReset
+				lineColors = append(lineColors, colorGreen)
 			case a <= thresholds[1]:
-				line = colorYellow + line + colorReset
+				lineColors = append(lineColors, colorYellow)
 			default:
-				line = colorRed + line + colorReset
+				lineColors = append(lineColors, colorRed)
 			}
+		} else {
+			lineColors = append(lineColors, "")
 		}
-
-		fmt.Fprintln(w, line)
 	}
 	w.Flush()
+
+	// Apply colors to the already-formatted output.
+	lines := strings.Split(buf.String(), "\n")
+	const headerLines = 2
+	for i, line := range lines {
+		if line == "" {
+			continue
+		}
+		ci := i - headerLines
+		if ci >= 0 && ci < len(lineColors) && lineColors[ci] != "" {
+			fmt.Println(lineColors[ci] + line + colorReset)
+		} else {
+			fmt.Println(line)
+		}
+	}
 }
 
 // avgTerciles computes the 33rd and 67th percentile of avg times

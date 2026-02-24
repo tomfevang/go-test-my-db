@@ -4,12 +4,12 @@ options:
 
 tables:
   BenchCompany:
-    rows: 2000
+    rows: 500
     columns:
       name: "{{Company}}"
 
   AccountCheck:
-    rows: 1000000
+    rows: 50000
     references:
       companyId: BenchCompany.id
     columns:
@@ -19,7 +19,7 @@ tables:
       accountNumber: '{{Numerify "####-####-##"}}'
 
   AccountAnomaly:
-    rows: 10000000
+    rows: 500000
     references:
       accountCheckId: AccountCheck.id
       companyId: BenchCompany.id
@@ -34,72 +34,72 @@ tests:
 
   - name: "company + severity"
     query: |-
-      SELECT id, _severity, date, status FROM AccountAnomaly WHERE companyId = {{Number 1 2000}} AND _severity = '{{RandomString (SliceString "LOW" "MEDIUM" "HIGH" "CRITICAL")}}'
+      SELECT id, _severity, date, status FROM AccountAnomaly WHERE companyId = {{Number 1 500}} AND _severity = '{{RandomString (SliceString "LOW" "MEDIUM" "HIGH" "CRITICAL")}}'
     repeat: 100
 
   - name: "company + severity + date"
     query: |-
-      SELECT id, _severity, date, status FROM AccountAnomaly WHERE companyId = {{Number 1 2000}} AND _severity = '{{RandomString (SliceString "LOW" "MEDIUM" "HIGH" "CRITICAL")}}' AND date >= '2024-01-01'
+      SELECT id, _severity, date, status FROM AccountAnomaly WHERE companyId = {{Number 1 500}} AND _severity = '{{RandomString (SliceString "LOW" "MEDIUM" "HIGH" "CRITICAL")}}' AND date >= '2024-01-01'
     repeat: 100
 
   - name: "company + severity + status + date"
     query: |-
-      SELECT id, _severity, date, status FROM AccountAnomaly WHERE companyId = {{Number 1 2000}} AND _severity = '{{RandomString (SliceString "LOW" "MEDIUM" "HIGH" "CRITICAL")}}' AND status = '{{RandomString (SliceString "OPEN" "INVESTIGATING" "RESOLVED" "DISMISSED")}}' AND date >= '2024-01-01'
+      SELECT id, _severity, date, status FROM AccountAnomaly WHERE companyId = {{Number 1 500}} AND _severity = '{{RandomString (SliceString "LOW" "MEDIUM" "HIGH" "CRITICAL")}}' AND status = '{{RandomString (SliceString "OPEN" "INVESTIGATING" "RESOLVED" "DISMISSED")}}' AND date >= '2024-01-01'
     repeat: 100
 
   - name: "company + amount range"
     query: |-
-      SELECT id, _amount, status FROM AccountAnomaly WHERE companyId = {{Number 1 2000}} AND _amount > 90
+      SELECT id, _amount, status FROM AccountAnomaly WHERE companyId = {{Number 1 500}} AND _amount > 90
     repeat: 100
 
   - name: "company + status + amount"
     query: |-
-      SELECT id, _severity, _amount, status FROM AccountAnomaly WHERE companyId = {{Number 1 2000}} AND status = '{{RandomString (SliceString "OPEN" "INVESTIGATING" "RESOLVED" "DISMISSED")}}' AND _amount > 90
+      SELECT id, _severity, _amount, status FROM AccountAnomaly WHERE companyId = {{Number 1 500}} AND status = '{{RandomString (SliceString "OPEN" "INVESTIGATING" "RESOLVED" "DISMISSED")}}' AND _amount > 90
     repeat: 100
 
   - name: "ORDER BY: severity + date (indexed)"
     query: |-
-      SELECT id, _severity, date FROM AccountAnomaly WHERE companyId = {{Number 1 2000}} AND _severity = '{{RandomString (SliceString "LOW" "MEDIUM" "HIGH" "CRITICAL")}}' ORDER BY date LIMIT 50
+      SELECT id, _severity, date FROM AccountAnomaly WHERE companyId = {{Number 1 500}} AND _severity = '{{RandomString (SliceString "LOW" "MEDIUM" "HIGH" "CRITICAL")}}' ORDER BY date LIMIT 50
     repeat: 100
 
   - name: "ORDER BY: severity + amount (filesort)"
     query: |-
-      SELECT id, _severity, _amount FROM AccountAnomaly WHERE companyId = {{Number 1 2000}} AND _severity = '{{RandomString (SliceString "LOW" "MEDIUM" "HIGH" "CRITICAL")}}' ORDER BY _amount LIMIT 50
+      SELECT id, _severity, _amount FROM AccountAnomaly WHERE companyId = {{Number 1 500}} AND _severity = '{{RandomString (SliceString "LOW" "MEDIUM" "HIGH" "CRITICAL")}}' ORDER BY _amount LIMIT 50
     repeat: 100
 
   - name: "ORDER BY: status + date (scan + filesort)"
     query: |-
-      SELECT id, status, date FROM AccountAnomaly WHERE companyId = {{Number 1 2000}} AND status = '{{RandomString (SliceString "OPEN" "INVESTIGATING" "RESOLVED" "DISMISSED")}}' ORDER BY date LIMIT 50
+      SELECT id, status, date FROM AccountAnomaly WHERE companyId = {{Number 1 500}} AND status = '{{RandomString (SliceString "OPEN" "INVESTIGATING" "RESOLVED" "DISMISSED")}}' ORDER BY date LIMIT 50
     repeat: 100
 
   - name: "join: severity + region"
     query: |-
-      SELECT a.id, a._severity, a.date, c.anomalyType FROM AccountAnomaly a JOIN AccountCheck c ON a.accountCheckId = c.id WHERE a.companyId = {{Number 1 2000}} AND a._severity = '{{RandomString (SliceString "LOW" "MEDIUM" "HIGH" "CRITICAL")}}' AND c._region = '{{RandomString (SliceString "EMEA" "APAC" "NAM" "LATAM")}}'
+      SELECT a.id, a._severity, a.date, c.anomalyType FROM AccountAnomaly a JOIN AccountCheck c ON a.accountCheckId = c.id WHERE a.companyId = {{Number 1 500}} AND a._severity = '{{RandomString (SliceString "LOW" "MEDIUM" "HIGH" "CRITICAL")}}' AND c._region = '{{RandomString (SliceString "EMEA" "APAC" "NAM" "LATAM")}}'
     repeat: 100
 
   - name: "agg: GROUP BY severity"
     query: |-
-      SELECT _severity, COUNT(*) AS cnt FROM AccountAnomaly WHERE companyId = {{Number 1 2000}} GROUP BY _severity
+      SELECT _severity, COUNT(*) AS cnt FROM AccountAnomaly WHERE companyId = {{Number 1 500}} GROUP BY _severity
     repeat: 100
 
   - name: "agg: filtered GROUP BY status"
     query: |-
-      SELECT status, COUNT(*), AVG(_amount) FROM AccountAnomaly WHERE companyId = {{Number 1 2000}} AND _severity = '{{RandomString (SliceString "LOW" "MEDIUM" "HIGH" "CRITICAL")}}' GROUP BY status
+      SELECT status, COUNT(*), AVG(_amount) FROM AccountAnomaly WHERE companyId = {{Number 1 500}} AND _severity = '{{RandomString (SliceString "LOW" "MEDIUM" "HIGH" "CRITICAL")}}' GROUP BY status
     repeat: 100
 
   # --- json-path variants (generated-col specific) ---
 
   - name: "json-path: company + severity"
     query: |-
-      SELECT id, details->>'$.severity' AS severity, date, status FROM AccountAnomaly WHERE companyId = {{Number 1 2000}} AND details->>'$.severity' = '{{RandomString (SliceString "LOW" "MEDIUM" "HIGH" "CRITICAL")}}'
+      SELECT id, details->>'$.severity' AS severity, date, status FROM AccountAnomaly WHERE companyId = {{Number 1 500}} AND details->>'$.severity' = '{{RandomString (SliceString "LOW" "MEDIUM" "HIGH" "CRITICAL")}}'
     repeat: 100
 
   - name: "json-path: company + amount range"
     query: |-
-      SELECT id, CAST(details->>'$.amount' AS SIGNED) AS amount, status FROM AccountAnomaly WHERE companyId = {{Number 1 2000}} AND CAST(details->>'$.amount' AS SIGNED) > 90
+      SELECT id, CAST(details->>'$.amount' AS SIGNED) AS amount, status FROM AccountAnomaly WHERE companyId = {{Number 1 500}} AND CAST(details->>'$.amount' AS SIGNED) > 90
     repeat: 100
 
   - name: "json-path: GROUP BY severity"
     query: |-
-      SELECT details->>'$.severity' AS severity, COUNT(*) AS cnt FROM AccountAnomaly WHERE companyId = {{Number 1 2000}} GROUP BY details->>'$.severity'
+      SELECT details->>'$.severity' AS severity, COUNT(*) AS cnt FROM AccountAnomaly WHERE companyId = {{Number 1 500}} GROUP BY details->>'$.severity'
     repeat: 100
