@@ -19,10 +19,10 @@ type correlationState struct {
 
 // buildCorrelationGenerators overlays correlated generators onto rg.generators.
 // Must be called after individual generators are built.
-func (rg *RowGenerator) buildCorrelationGenerators() {
+func (rg *RowGenerator) buildCorrelationGenerators() error {
 	groups := rg.config.GetCorrelations(rg.table.Name)
 	if len(groups) == 0 {
-		return
+		return nil
 	}
 
 	// Build column name -> index in rg.columns
@@ -32,17 +32,20 @@ func (rg *RowGenerator) buildCorrelationGenerators() {
 	}
 
 	for _, group := range groups {
-		rg.applyCorrelationGroup(group, colIndex)
+		if err := rg.applyCorrelationGroup(group, colIndex); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
-func (rg *RowGenerator) applyCorrelationGroup(group config.CorrelationGroup, colIndex map[string]int) {
+func (rg *RowGenerator) applyCorrelationGroup(group config.CorrelationGroup, colIndex map[string]int) error {
 	// Resolve column indices
 	indices := make([]int, 0, len(group.Columns))
 	for _, name := range group.Columns {
 		idx, ok := colIndex[name]
 		if !ok {
-			panic(fmt.Sprintf("correlation: column %q not found in table %s (or is auto-inc/generated)", name, rg.table.Name))
+			return fmt.Errorf("correlation: column %q not found in table %s (or is auto-inc/generated)", name, rg.table.Name)
 		}
 		indices = append(indices, idx)
 	}
@@ -68,9 +71,13 @@ func (rg *RowGenerator) applyCorrelationGroup(group config.CorrelationGroup, col
 	case "latlong":
 		generateGroup = rg.buildLatLongGroup(state, group.Columns)
 	case "template":
-		generateGroup = rg.buildTemplateGroup(state, group)
+		var err error
+		generateGroup, err = rg.buildTemplateGroup(state, group)
+		if err != nil {
+			return err
+		}
 	default:
-		panic(fmt.Sprintf("correlation: unknown source %q", group.Source))
+		return fmt.Errorf("correlation: unknown source %q", group.Source)
 	}
 
 	// First column triggers generation; all columns read from state
@@ -104,6 +111,7 @@ func (rg *RowGenerator) applyCorrelationGroup(group config.CorrelationGroup, col
 			}
 		}
 	}
+	return nil
 }
 
 // buildAddressGroup generates coherent address components from gofakeit.Address().
@@ -170,7 +178,7 @@ func (rg *RowGenerator) buildLatLongGroup(state *correlationState, columns []str
 
 // buildTemplateGroup generates values using user-defined templates.
 // Templates are evaluated in column order; each receives previously generated values.
-func (rg *RowGenerator) buildTemplateGroup(state *correlationState, group config.CorrelationGroup) func() {
+func (rg *RowGenerator) buildTemplateGroup(state *correlationState, group config.CorrelationGroup) (func(), error) {
 	// Parse all templates at init
 	type parsedCol struct {
 		name string
@@ -183,11 +191,11 @@ func (rg *RowGenerator) buildTemplateGroup(state *correlationState, group config
 	for _, col := range group.Columns {
 		tmplStr, ok := group.Template[col]
 		if !ok {
-			panic(fmt.Sprintf("correlation template: no template for column %q", col))
+			return nil, fmt.Errorf("correlation template: no template for column %q", col)
 		}
 		t, err := template.New(col).Funcs(fm).Parse(tmplStr)
 		if err != nil {
-			panic(fmt.Sprintf("correlation template: invalid template for %q: %v", col, err))
+			return nil, fmt.Errorf("correlation template: invalid template for %q: %w", col, err)
 		}
 		parsed = append(parsed, parsedCol{name: col, tmpl: t})
 	}
@@ -205,5 +213,5 @@ func (rg *RowGenerator) buildTemplateGroup(state *correlationState, group config
 			}
 			state.values[pc.name] = buf.String()
 		}
-	}
+	}, nil
 }

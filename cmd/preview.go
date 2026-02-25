@@ -481,7 +481,10 @@ func runPreviewInMemory(db *sql.DB, schema string, cfg *config.Config) error {
 			genCount = n * n * 4 // e.g., 100 rows to group across 5 parents
 		}
 
-		gen := generator.NewRowGenerator(table, tableFKValues, cfg, pkStartValues, nil, nil)
+		gen, err := generator.NewRowGenerator(table, tableFKValues, nil, cfg, pkStartValues, nil, nil)
+		if err != nil {
+			return err
+		}
 		genCols := gen.Columns()
 		sampleRows := make([][]any, genCount)
 		for i := range sampleRows {

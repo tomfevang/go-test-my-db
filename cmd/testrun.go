@@ -3,7 +3,6 @@ package cmd
 import (
 	"database/sql"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -128,12 +127,3 @@ func runTestPipeline(db *sql.DB, schema string, cfg *config.Config, schemaFile s
 	return results, len(tableNames), nil
 }
 
-// deriveLabel extracts a short label from a config file path.
-// "config-star.yaml" → "star", "my-config.yaml" → "my-config"
-func deriveLabel(path string) string {
-	base := filepath.Base(path)
-	ext := filepath.Ext(base)
-	name := strings.TrimSuffix(base, ext)
-	name = strings.TrimPrefix(name, "config-")
-	return name
-}

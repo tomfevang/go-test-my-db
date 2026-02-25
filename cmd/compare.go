@@ -15,6 +15,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/tomfevang/go-seed-my-db/internal/config"
+	"github.com/tomfevang/go-seed-my-db/internal/ephemeral"
 )
 
 var (
@@ -29,25 +30,35 @@ var (
 	compareLoadData     bool
 	compareDeferIndexes bool
 	compareFKSampleSize int
+	compareEphemeral    bool
 )
 
 var compareCmd = &cobra.Command{
-	Use:   "compare [comparison.yaml | config1.yaml config2.yaml ...]",
+	Use:   "compare comparison.yaml",
 	Short: "Compare schema performance across multiple configurations",
-	Long: `The compare subcommand runs the test workflow for multiple configs
-and presents a side-by-side comparison of query performance.
+	Long: `The compare subcommand runs the test workflow for multiple schema
+configs and presents a side-by-side comparison of query performance.
 
-Two modes are supported:
+It takes a single comparison YAML file with a 'configs' key that
+references seed config files and a 'tests' key with per-config
+query variants:
 
-  1. Comparison config (single arg): A YAML file with a 'configs' key that
-     references seed config files and defines per-config query variants
-     side by side in one place.
+  configs:
+    - label: baseline
+      file: config-baseline.yaml
+    - label: optimized
+      file: config-optimized.yaml
 
-  2. Multi-config (2+ args): Multiple seed config files passed as positional
-     args. Tests are matched by name across configs.
+  tests:
+    - name: "filter by status"
+      repeat: 100
+      queries:
+        baseline: "SELECT ... FROM t WHERE status = ..."
+        optimized: "SELECT ... FROM t_v2 WHERE status = ..."
 
+For benchmarking a single schema (no comparison), use the test command.
 Use --ai to get an AI-powered analysis of the results via Claude.`,
-	Args: cobra.MinimumNArgs(1),
+	Args: cobra.ExactArgs(1),
 	RunE: runCompare,
 }
 
@@ -63,6 +74,7 @@ func init() {
 	compareCmd.Flags().BoolVar(&compareLoadData, "load-data", false, "Use LOAD DATA LOCAL INFILE for faster bulk loading (overrides all configs)")
 	compareCmd.Flags().BoolVar(&compareDeferIndexes, "defer-indexes", false, "Drop secondary indexes before seeding and rebuild after (overrides all configs)")
 	compareCmd.Flags().IntVar(&compareFKSampleSize, "fk-sample-size", 0, "Override max FK parent values to cache per column (0 = use each config's value)")
+	compareCmd.Flags().BoolVar(&compareEphemeral, "ephemeral", false, "Start a temporary MySQL container via Docker or Podman (no DSN needed)")
 
 	rootCmd.AddCommand(compareCmd)
 }
@@ -75,32 +87,9 @@ type compareEntry struct {
 }
 
 func runCompare(cmd *cobra.Command, args []string) error {
-	// Single arg that looks like a comparison config → comparison mode.
-	if len(args) == 1 && config.IsCompareConfig(args[0]) {
-		return runCompareFromComparisonConfig(cmd, args[0])
-	}
-
-	// Legacy mode requires 2+ seed config files.
-	if len(args) < 2 {
-		return fmt.Errorf("expected a comparison config file or at least 2 seed config files")
-	}
-
-	entries := make([]compareEntry, len(args))
-	for i, path := range args {
-		cfg, err := config.Load(path)
-		if err != nil {
-			return fmt.Errorf("loading config %s: %w", path, err)
-		}
-		entries[i] = compareEntry{cfg: cfg, label: deriveLabel(path), path: path}
-	}
-
-	return executeComparison(cmd, entries)
-}
-
-func runCompareFromComparisonConfig(cmd *cobra.Command, path string) error {
-	cc, err := config.LoadCompare(path)
+	cc, err := config.LoadCompare(args[0])
 	if err != nil {
-		return fmt.Errorf("loading comparison config %s: %w", path, err)
+		return fmt.Errorf("loading comparison config %s: %w", args[0], err)
 	}
 
 	entries := make([]compareEntry, len(cc.Configs))
@@ -133,8 +122,18 @@ func executeComparison(cmd *cobra.Command, entries []compareEntry) error {
 			}
 		}
 	}
+	// Start ephemeral MySQL if requested and no DSN was provided.
+	if compareEphemeral && dsnVal == "" {
+		edb, err := ephemeral.Start(cmd.Context())
+		if err != nil {
+			return err
+		}
+		defer edb.Stop()
+		dsnVal = edb.DSN
+	}
+
 	if dsnVal == "" {
-		return fmt.Errorf("DSN is required — set via --dsn flag, SEED_DSN env var, or options.dsn in a config file")
+		return fmt.Errorf("DSN is required — set via --dsn flag, SEED_DSN env var, options.dsn in a config file, or use --ephemeral")
 	}
 
 	schema := extractSchema(dsnVal)

@@ -86,6 +86,12 @@ func SeedAll(cfg Config) error {
 	fkCache := make(map[string][]any) // "table.column" -> values
 	lastConsumer := computeLastConsumers(cfg.Tables)
 
+	// Build table map for FK correlation detection.
+	tableMap := make(map[string]*introspect.Table, len(cfg.Tables))
+	for _, t := range cfg.Tables {
+		tableMap[t.Name] = t
+	}
+
 	for i, table := range cfg.Tables {
 		targetRows := cfg.RowsPerTable[table.Name]
 		if targetRows <= 0 {
@@ -128,11 +134,22 @@ func SeedAll(cfg Config) error {
 				return fmt.Errorf("fetching indexes for %s: %w", table.Name, err)
 			}
 			if len(idxs) > 0 {
-				fmt.Printf("[%s] dropping %d secondary indexes...\n", table.Name, len(idxs))
-				if err := dropSecondaryIndexes(cfg.DB, table.Name, idxs); err != nil {
-					return err
+				// Exclude indexes that are the sole backing index for a FK constraint.
+				fkColSets, err := fetchFKColumnSets(cfg.DB, cfg.Schema, table.Name)
+				if err != nil {
+					return fmt.Errorf("fetching FK constraints for %s: %w", table.Name, err)
 				}
-				droppedIndexes = idxs
+				droppable, kept := filterFKBackingIndexes(idxs, fkColSets)
+				if len(kept) > 0 {
+					fmt.Printf("[%s] keeping %d FK-backing indexes\n", table.Name, len(kept))
+				}
+				if len(droppable) > 0 {
+					fmt.Printf("[%s] dropping %d secondary indexes...\n", table.Name, len(droppable))
+					if err := dropSecondaryIndexes(cfg.DB, table.Name, droppable); err != nil {
+						return err
+					}
+					droppedIndexes = droppable
+				}
 			}
 		}
 
@@ -155,6 +172,24 @@ func SeedAll(cfg Config) error {
 			}
 		}
 
+		// Detect correlated FK columns and build lookup maps.
+		correlations := detectFKCorrelations(table, tableMap)
+		var fkLookups []generator.FKLookup
+		for _, corr := range correlations {
+			mapping, err := fetchFKLookup(cfg.DB, corr.parentTable, corr.parentPKCol, corr.parentFKCol)
+			if err != nil {
+				return fmt.Errorf("fetching FK lookup for %s.%s via %s: %w",
+					table.Name, corr.derivedCol, corr.parentTable, err)
+			}
+			fkLookups = append(fkLookups, generator.FKLookup{
+				DerivedColumn: corr.derivedCol,
+				DriverColumn:  corr.driverCol,
+				Mapping:       mapping,
+			})
+			fmt.Printf("[%s] correlating %s with %s (via %s.%s)\n",
+				table.Name, corr.derivedCol, corr.driverCol, corr.parentTable, corr.parentFKCol)
+		}
+
 		// Pre-load existing unique values for incremental seeding.
 		var existingUniques map[string][]any
 		var existingComposites []generator.ExistingCompositeTuple
@@ -163,7 +198,7 @@ func SeedAll(cfg Config) error {
 		}
 
 		if cfg.LoadData {
-			if err := seedTableLoadData(cfg, table, tableFKValues, existingUniques, existingComposites); err != nil {
+			if err := seedTableLoadData(cfg, table, tableFKValues, fkLookups, existingUniques, existingComposites); err != nil {
 				// Restore indexes even on seed failure.
 				if len(droppedIndexes) > 0 {
 					fmt.Printf("[%s] restoring %d secondary indexes after error...\n", table.Name, len(droppedIndexes))
@@ -172,7 +207,7 @@ func SeedAll(cfg Config) error {
 				return fmt.Errorf("seeding %s: %w", table.Name, err)
 			}
 		} else {
-			if err := seedTable(cfg, table, tableFKValues, existingUniques, existingComposites); err != nil {
+			if err := seedTable(cfg, table, tableFKValues, fkLookups, existingUniques, existingComposites); err != nil {
 				// Restore indexes even on seed failure.
 				if len(droppedIndexes) > 0 {
 					fmt.Printf("[%s] restoring %d secondary indexes after error...\n", table.Name, len(droppedIndexes))
@@ -216,7 +251,7 @@ func SeedAll(cfg Config) error {
 	return nil
 }
 
-func seedTable(cfg Config, table *introspect.Table, fkValues map[string][]any, existingUniques map[string][]any, existingComposites []generator.ExistingCompositeTuple) error {
+func seedTable(cfg Config, table *introspect.Table, fkValues map[string][]any, fkLookups []generator.FKLookup, existingUniques map[string][]any, existingComposites []generator.ExistingCompositeTuple) error {
 	// Compute starting values for non-auto-increment integer PKs.
 	pkStartValues := make(map[string]int64)
 	for _, col := range table.Columns {
@@ -229,7 +264,10 @@ func seedTable(cfg Config, table *introspect.Table, fkValues map[string][]any, e
 		}
 	}
 
-	gen := generator.NewRowGenerator(table, fkValues, cfg.GenConfig, pkStartValues, existingUniques, existingComposites)
+	gen, err := generator.NewRowGenerator(table, fkValues, fkLookups, cfg.GenConfig, pkStartValues, existingUniques, existingComposites)
+	if err != nil {
+		return err
+	}
 	columns := gen.Columns()
 
 	if len(columns) == 0 {
@@ -395,6 +433,100 @@ func reservoirSample(values []any, maxSample int) []any {
 		}
 	}
 	return reservoir
+}
+
+// fkCorrelationInfo describes a transitive FK relationship detected during seeding.
+// For example, if child has companyId → company.id and voucherId → voucher.id,
+// and voucher also has companyId → company.id, then companyId should be derived
+// from the voucherId's parent row to ensure realistic data.
+type fkCorrelationInfo struct {
+	derivedCol  string // column in child table to derive (e.g., companyId)
+	driverCol   string // column in child table that drives (e.g., voucherId)
+	parentTable string // driver's parent table (e.g., voucher)
+	parentPKCol string // PK column in parent (e.g., id)
+	parentFKCol string // FK column in parent that maps to derived target (e.g., companyId)
+}
+
+// detectFKCorrelations finds FK columns whose values should be derived from
+// another FK column's parent row. This ensures that when a table has multiple
+// FK columns to related entities, the generated data is consistent.
+func detectFKCorrelations(table *introspect.Table, allTables map[string]*introspect.Table) []fkCorrelationInfo {
+	// Collect FK columns.
+	var fkCols []introspect.Column
+	for _, col := range table.Columns {
+		if col.FK != nil {
+			fkCols = append(fkCols, col)
+		}
+	}
+	if len(fkCols) < 2 {
+		return nil
+	}
+
+	var result []fkCorrelationInfo
+	claimed := make(map[string]bool) // derived columns already assigned
+
+	for _, colA := range fkCols {
+		if claimed[colA.Name] {
+			continue
+		}
+		for _, colB := range fkCols {
+			if colA.Name == colB.Name || claimed[colA.Name] {
+				continue
+			}
+			// Skip if both reference the exact same table and column.
+			if colA.FK.ReferencedTable == colB.FK.ReferencedTable &&
+				colA.FK.ReferencedColumn == colB.FK.ReferencedColumn {
+				continue
+			}
+
+			parentB := allTables[colB.FK.ReferencedTable]
+			if parentB == nil {
+				continue
+			}
+
+			// Does parentB have a FK to colA's referenced table?
+			for _, pCol := range parentB.Columns {
+				if pCol.FK != nil &&
+					pCol.FK.ReferencedTable == colA.FK.ReferencedTable &&
+					pCol.FK.ReferencedColumn == colA.FK.ReferencedColumn {
+					result = append(result, fkCorrelationInfo{
+						derivedCol:  colA.Name,
+						driverCol:   colB.Name,
+						parentTable: colB.FK.ReferencedTable,
+						parentPKCol: colB.FK.ReferencedColumn,
+						parentFKCol: pCol.Name,
+					})
+					claimed[colA.Name] = true
+					break
+				}
+			}
+			if claimed[colA.Name] {
+				break
+			}
+		}
+	}
+
+	return result
+}
+
+// fetchFKLookup queries the parent table to build a mapping from parent PK
+// values to the corresponding FK column values.
+func fetchFKLookup(db *sql.DB, table, pkCol, fkCol string) (map[any]any, error) {
+	rows, err := db.Query(fmt.Sprintf("SELECT `%s`, `%s` FROM `%s`", pkCol, fkCol, table))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	lookup := make(map[any]any)
+	for rows.Next() {
+		var pk, fk any
+		if err := rows.Scan(&pk, &fk); err != nil {
+			return nil, err
+		}
+		lookup[pk] = fk
+	}
+	return lookup, rows.Err()
 }
 
 // computeLastConsumers maps each FK cache key ("table.column") to the index

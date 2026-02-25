@@ -146,7 +146,7 @@ func appendFloat(buf []byte, v float64) []byte {
 	return fmt.Appendf(buf, "%g", v)
 }
 
-func seedTableLoadData(cfg Config, table *introspect.Table, fkValues map[string][]any, existingUniques map[string][]any, existingComposites []generator.ExistingCompositeTuple) error {
+func seedTableLoadData(cfg Config, table *introspect.Table, fkValues map[string][]any, fkLookups []generator.FKLookup, existingUniques map[string][]any, existingComposites []generator.ExistingCompositeTuple) error {
 	// Compute starting values for non-auto-increment integer PKs.
 	pkStartValues := make(map[string]int64)
 	for _, col := range table.Columns {
@@ -159,7 +159,10 @@ func seedTableLoadData(cfg Config, table *introspect.Table, fkValues map[string]
 		}
 	}
 
-	gen := generator.NewRowGenerator(table, fkValues, cfg.GenConfig, pkStartValues, existingUniques, existingComposites)
+	gen, err := generator.NewRowGenerator(table, fkValues, fkLookups, cfg.GenConfig, pkStartValues, existingUniques, existingComposites)
+	if err != nil {
+		return err
+	}
 	columns := gen.Columns()
 
 	if len(columns) == 0 {

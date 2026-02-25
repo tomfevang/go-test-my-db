@@ -124,6 +124,7 @@ type RowGenerator struct {
 	columns            []introspect.Column // columns we actually generate (excludes auto-inc)
 	generators         []func() any
 	fkValues           map[string][]any // column name -> slice of valid FK values
+	fkLookups          []FKLookup       // correlated FK derivations
 	compositeUniques   []*compositeUniqueTracker
 	faker              *gofakeit.Faker
 	config             *config.Config
@@ -134,10 +135,11 @@ type RowGenerator struct {
 
 // NewRowGenerator creates a generator for the given table.
 // fkValues maps column name -> available parent IDs for FK columns.
+// fkLookups specifies correlated FK derivations (nil to skip).
 // pkStartValues maps column name -> starting value for non-auto-inc integer PKs.
 // existingUniques maps column name -> existing values for single-column unique constraints (nil to skip).
 // existingComposites provides existing tuples for composite unique indexes (nil to skip).
-func NewRowGenerator(table *introspect.Table, fkValues map[string][]any, cfg *config.Config, pkStartValues map[string]int64, existingUniques map[string][]any, existingComposites []ExistingCompositeTuple) *RowGenerator {
+func NewRowGenerator(table *introspect.Table, fkValues map[string][]any, fkLookups []FKLookup, cfg *config.Config, pkStartValues map[string]int64, existingUniques map[string][]any, existingComposites []ExistingCompositeTuple) (*RowGenerator, error) {
 	seqs := make(map[string]*atomic.Int64, len(pkStartValues))
 	for col, start := range pkStartValues {
 		seq := &atomic.Int64{}
@@ -148,6 +150,7 @@ func NewRowGenerator(table *introspect.Table, fkValues map[string][]any, cfg *co
 	rg := &RowGenerator{
 		table:              table,
 		fkValues:           fkValues,
+		fkLookups:          fkLookups,
 		faker:              gofakeit.New(0),
 		config:             cfg,
 		sequences:          seqs,
@@ -164,13 +167,21 @@ func NewRowGenerator(table *introspect.Table, fkValues map[string][]any, cfg *co
 
 	rg.generators = make([]func() any, len(rg.columns))
 	for i, col := range rg.columns {
-		rg.generators[i] = rg.buildGenerator(col)
+		gen, err := rg.buildGenerator(col)
+		if err != nil {
+			return nil, err
+		}
+		rg.generators[i] = gen
 	}
 
-	rg.buildCorrelationGenerators()
+	rg.applyFKCorrelations()
+
+	if err := rg.buildCorrelationGenerators(); err != nil {
+		return nil, err
+	}
 	rg.initUniqueTracking()
 
-	return rg
+	return rg, nil
 }
 
 // Columns returns the column names that this generator produces values for.
@@ -259,7 +270,7 @@ func (rg *RowGenerator) funcMap() template.FuncMap {
 	return FuncMap(rg.faker)
 }
 
-func (rg *RowGenerator) buildGenerator(col introspect.Column) func() any {
+func (rg *RowGenerator) buildGenerator(col introspect.Column) (func() any, error) {
 	// FK columns: pick a value from the parent table using distribution.
 	if col.FK != nil {
 		if vals, ok := rg.fkValues[col.Name]; ok && len(vals) > 0 {
@@ -267,7 +278,7 @@ func (rg *RowGenerator) buildGenerator(col introspect.Column) func() any {
 			picker := NewValuePicker(vals, dist)
 			return func() any {
 				return picker.Pick()
-			}
+			}, nil
 		}
 	}
 
@@ -276,7 +287,7 @@ func (rg *RowGenerator) buildGenerator(col introspect.Column) func() any {
 		if seq, ok := rg.sequences[col.Name]; ok {
 			return func() any {
 				return seq.Add(1) - 1
-			}
+			}, nil
 		}
 	}
 
@@ -290,14 +301,14 @@ func (rg *RowGenerator) buildGenerator(col introspect.Column) func() any {
 		picker := NewValuePicker(enumVals, dist)
 		return rg.wrapNullable(col, func() any {
 			return picker.Pick()
-		})
+		}), nil
 	}
 
 	// Config template override.
 	if tmpl := rg.config.GetTemplate(rg.table.Name, col.Name); tmpl != "" {
 		parsed, err := template.New(col.Name).Funcs(rg.funcMap()).Parse(tmpl)
 		if err != nil {
-			panic(fmt.Sprintf("invalid template for %s.%s: %v", rg.table.Name, col.Name, err))
+			return nil, fmt.Errorf("invalid template for %s.%s: %w", rg.table.Name, col.Name, err)
 		}
 		var buf bytes.Buffer
 		return rg.wrapNullable(col, func() any {
@@ -306,16 +317,16 @@ func (rg *RowGenerator) buildGenerator(col introspect.Column) func() any {
 				panic(fmt.Sprintf("template exec failed for %s.%s: %v", rg.table.Name, col.Name, err))
 			}
 			return buf.String()
-		})
+		}), nil
 	}
 
 	// Name-based heuristics.
 	if gen := rg.nameBasedGenerator(col); gen != nil {
-		return rg.wrapNullable(col, gen)
+		return rg.wrapNullable(col, gen), nil
 	}
 
 	// Type-based fallback.
-	return rg.wrapNullable(col, rg.typeBasedGenerator(col))
+	return rg.wrapNullable(col, rg.typeBasedGenerator(col)), nil
 }
 
 func (rg *RowGenerator) wrapNullable(col introspect.Column, gen func() any) func() any {

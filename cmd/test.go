@@ -18,6 +18,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/tomfevang/go-seed-my-db/internal/config"
+	"github.com/tomfevang/go-seed-my-db/internal/ephemeral"
 	"github.com/tomfevang/go-seed-my-db/internal/generator"
 )
 
@@ -43,6 +44,7 @@ var (
 	testLoadData     bool
 	testDeferIndexes bool
 	testFKSampleSize int
+	testEphemeral    bool
 )
 
 var testCmd = &cobra.Command{
@@ -69,6 +71,7 @@ func init() {
 	testCmd.Flags().BoolVar(&testLoadData, "load-data", false, "Use LOAD DATA LOCAL INFILE for faster bulk loading (requires server local_infile=ON)")
 	testCmd.Flags().BoolVar(&testDeferIndexes, "defer-indexes", false, "Drop secondary indexes before seeding and rebuild after (faster for large tables)")
 	testCmd.Flags().IntVar(&testFKSampleSize, "fk-sample-size", 500_000, "Max FK parent values to cache per column (0 = unlimited)")
+	testCmd.Flags().BoolVar(&testEphemeral, "ephemeral", false, "Start a temporary MySQL container via Docker or Podman (no DSN needed)")
 
 	rootCmd.AddCommand(testCmd)
 }
@@ -106,8 +109,18 @@ func runTest(cmd *cobra.Command, args []string) error {
 	}
 	testFKSampleSize = resolveInt(cmd, "fk-sample-size", testFKSampleSize, cfg.Options.FKSampleSize, 500_000)
 
+	// Start ephemeral MySQL if requested and no DSN was provided.
+	if testEphemeral && testDSN == "" {
+		edb, err := ephemeral.Start(cmd.Context())
+		if err != nil {
+			return err
+		}
+		defer edb.Stop()
+		testDSN = edb.DSN
+	}
+
 	if testDSN == "" {
-		return fmt.Errorf("DSN is required — set via --dsn flag, SEED_DSN env var, or options.dsn in config file")
+		return fmt.Errorf("DSN is required — set via --dsn flag, SEED_DSN env var, options.dsn in config file, or use --ephemeral")
 	}
 	if testSchemaFile == "" {
 		return fmt.Errorf("schema file is required — set via --schema flag or options.schema in config file")
@@ -232,6 +245,7 @@ func dropTables(db *sql.DB, tableNames []string) {
 func runTests(db *sql.DB, tests []config.TestCase) []TestResult {
 	// Set up template rendering once for all tests.
 	fm := generator.FuncMap(gofakeit.New(0))
+	fm["SampleRow"] = makeSampleRowFunc(db)
 	var buf bytes.Buffer
 
 	results := make([]TestResult, 0, len(tests))
@@ -253,6 +267,19 @@ func runTests(db *sql.DB, tests []config.TestCase) []TestResult {
 					Error: fmt.Errorf("invalid query template: %w", err),
 				})
 				fmt.Printf("[%d/%d] %s ... ERROR: invalid template\n", ti+1, len(tests), tc.Name)
+				continue
+			}
+			// Warm up: execute the template once to populate any SampleRow
+			// caches before the timed loop so that lazy DB fetches don't
+			// skew the first iteration.
+			buf.Reset()
+			if err := tmpl.Execute(&buf, nil); err != nil {
+				results = append(results, TestResult{
+					Name:  tc.Name,
+					Query: tc.Query,
+					Error: fmt.Errorf("template warmup failed: %w", err),
+				})
+				fmt.Printf("[%d/%d] %s ... ERROR: template warmup failed\n", ti+1, len(tests), tc.Name)
 				continue
 			}
 		}
