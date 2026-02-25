@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.0.1](https://github.com/tomfevang/go-test-my-db/compare/v1.0.0...v1.0.1) (2026-02-25)
+
+
+### Bug Fixes
+
+* run goreleaser inline in release-please workflow ([89ba0fd](https://github.com/tomfevang/go-test-my-db/commit/89ba0fd009200320295c7f65185241aa2d7d60e4))
+
+
+### Code Refactoring
+
+* rename project from go-seed-my-db to go-test-my-db ([741ed6d](https://github.com/tomfevang/go-test-my-db/commit/741ed6d27a72a480b92823c07ef4bd7cbf48f155))
+
 ## 1.0.0 (2026-02-25)
 
 
