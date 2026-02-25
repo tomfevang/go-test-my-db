@@ -5,7 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/tomfevang/go-seed-my-db/internal/version"
+	"github.com/tomfevang/go-test-my-db/internal/version"
 )
 
 var versionCmd = &cobra.Command{

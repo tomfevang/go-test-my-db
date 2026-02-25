@@ -9,7 +9,7 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/tomfevang/go-seed-my-db/internal/introspect"
+	"github.com/tomfevang/go-test-my-db/internal/introspect"
 )
 
 type describeTableArgs struct {

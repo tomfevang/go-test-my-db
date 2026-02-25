@@ -12,9 +12,9 @@ import (
 
 	"golang.org/x/term"
 
-	"github.com/tomfevang/go-seed-my-db/internal/config"
-	"github.com/tomfevang/go-seed-my-db/internal/generator"
-	"github.com/tomfevang/go-seed-my-db/internal/introspect"
+	"github.com/tomfevang/go-test-my-db/internal/config"
+	"github.com/tomfevang/go-test-my-db/internal/generator"
+	"github.com/tomfevang/go-test-my-db/internal/introspect"
 )
 
 const barWidth = 30

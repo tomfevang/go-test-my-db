@@ -6,10 +6,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/tomfevang/go-seed-my-db/internal/config"
-	"github.com/tomfevang/go-seed-my-db/internal/depgraph"
-	"github.com/tomfevang/go-seed-my-db/internal/introspect"
-	"github.com/tomfevang/go-seed-my-db/internal/seeder"
+	"github.com/tomfevang/go-test-my-db/internal/config"
+	"github.com/tomfevang/go-test-my-db/internal/depgraph"
+	"github.com/tomfevang/go-test-my-db/internal/introspect"
+	"github.com/tomfevang/go-test-my-db/internal/seeder"
 )
 
 // ConfigResult holds the full test output for a single config file.

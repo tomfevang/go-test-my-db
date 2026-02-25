@@ -48,7 +48,7 @@ func errResult(msg string) *mcp.CallToolResult {
 	}
 }
 
-// runSelf executes the go-seed-my-db binary (itself) with the given arguments
+// runSelf executes the go-test-my-db binary (itself) with the given arguments
 // and returns its stdout output.
 func runSelf(ctx context.Context, args ...string) (string, error) {
 	exe, err := os.Executable()

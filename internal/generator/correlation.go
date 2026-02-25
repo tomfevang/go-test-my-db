@@ -7,7 +7,7 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/tomfevang/go-seed-my-db/internal/config"
+	"github.com/tomfevang/go-test-my-db/internal/config"
 )
 
 // correlationState holds shared values for a correlated column group.

@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/tomfevang/go-seed-my-db/internal/introspect"
+	"github.com/tomfevang/go-test-my-db/internal/introspect"
 )
 
 var update = flag.Bool("update", false, "update golden files")

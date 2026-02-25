@@ -86,14 +86,14 @@ func Load(path string) (*Config, error) {
 }
 
 // LoadOrDefault tries to load from the given path. If path is empty, it
-// attempts to auto-detect "go-seed-my-db.yaml" in the current directory.
+// attempts to auto-detect "go-test-my-db.yaml" in the current directory.
 // Returns an empty Config if no file is found at the auto-detect path.
 func LoadOrDefault(path string) (*Config, error) {
 	if path != "" {
 		return Load(path)
 	}
 
-	const defaultFile = "go-seed-my-db.yaml"
+	const defaultFile = "go-test-my-db.yaml"
 	if _, err := os.Stat(defaultFile); err != nil {
 		// File doesn't exist — that's fine, return empty config.
 		return &Config{}, nil

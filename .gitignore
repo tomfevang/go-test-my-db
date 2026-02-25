@@ -1,5 +1,5 @@
 # Binaries
-go-seed-my-db
+go-test-my-db
 *.exe
 *.exe~
 *.dll

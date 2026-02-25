@@ -9,11 +9,11 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/tomfevang/go-seed-my-db/internal/config"
-	"github.com/tomfevang/go-seed-my-db/internal/depgraph"
-	"github.com/tomfevang/go-seed-my-db/internal/generator"
-	"github.com/tomfevang/go-seed-my-db/internal/introspect"
-	"github.com/tomfevang/go-seed-my-db/internal/seeder"
+	"github.com/tomfevang/go-test-my-db/internal/config"
+	"github.com/tomfevang/go-test-my-db/internal/depgraph"
+	"github.com/tomfevang/go-test-my-db/internal/generator"
+	"github.com/tomfevang/go-test-my-db/internal/introspect"
+	"github.com/tomfevang/go-test-my-db/internal/seeder"
 )
 
 var (
@@ -55,7 +55,7 @@ verify that relationships make sense.`,
 func init() {
 	previewCmd.Flags().StringVar(&previewDSN, "dsn", "", "MySQL DSN (required), e.g. user:pass@tcp(localhost:3306)/mydb")
 	previewCmd.Flags().StringVar(&previewSchemaFile, "schema", "", "Path to SQL DDL file (creates temporary tables)")
-	previewCmd.Flags().StringVar(&previewConfigPath, "config", "", "Path to config YAML file (default: auto-detect go-seed-my-db.yaml)")
+	previewCmd.Flags().StringVar(&previewConfigPath, "config", "", "Path to config YAML file (default: auto-detect go-test-my-db.yaml)")
 	previewCmd.Flags().StringSliceVar(&previewTables, "table", nil, "Table(s) to preview (repeatable). If omitted, previews all tables")
 	previewCmd.Flags().IntVar(&previewSampleRows, "sample-rows", 5, "Number of sample rows/groups to display per table")
 	previewCmd.Flags().IntVar(&previewRows, "rows", 1000, "Base row count for root tables")

@@ -1,5 +1,5 @@
 # Comparison config: generated-columns vs star-schema
-# Usage: go-seed-my-db compare examples/comparison.yaml --dsn ...
+# Usage: go-test-my-db compare examples/comparison.yaml --dsn ...
 
 configs:
   - label: generated

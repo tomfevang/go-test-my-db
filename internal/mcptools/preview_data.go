@@ -10,7 +10,7 @@ import (
 type previewDataArgs struct {
 	Tables     []string `json:"tables,omitempty" jsonschema:"Tables to preview. If omitted, previews all tables."`
 	SampleRows int      `json:"sample_rows,omitempty" jsonschema:"Number of sample rows per table (default 5, max 20)."`
-	ConfigPath string   `json:"config_path,omitempty" jsonschema:"Path to a go-seed-my-db.yaml config file."`
+	ConfigPath string   `json:"config_path,omitempty" jsonschema:"Path to a go-test-my-db.yaml config file."`
 }
 
 func registerPreviewData(s *mcp.Server) {

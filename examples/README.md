@@ -16,7 +16,7 @@ Both schemas model the same data (companies, account checks, anomalies) so query
 Use `test` to create tables, seed, benchmark, and tear down in one shot:
 
 ```bash
-go-seed-my-db test \
+go-test-my-db test \
   --dsn "user:pass@tcp(localhost:3306)/mydb" \
   --schema examples/schema.sql \
   --config examples/config-generated.yaml
@@ -27,7 +27,7 @@ go-seed-my-db test \
 Use `compare` with the comparison config to run both schemas and see results side by side:
 
 ```bash
-go-seed-my-db compare \
+go-test-my-db compare \
   --dsn "user:pass@tcp(localhost:3306)/mydb" \
   examples/comparison.yaml
 ```

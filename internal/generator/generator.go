@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"github.com/brianvoe/gofakeit/v7"
-	"github.com/tomfevang/go-seed-my-db/internal/config"
-	"github.com/tomfevang/go-seed-my-db/internal/introspect"
+	"github.com/tomfevang/go-test-my-db/internal/config"
+	"github.com/tomfevang/go-test-my-db/internal/introspect"
 )
 
 // NameBasedLabel returns a human-readable label for the name-based heuristic

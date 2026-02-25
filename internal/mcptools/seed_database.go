@@ -17,7 +17,7 @@ type seedDatabaseArgs struct {
 	MaxChildren  int      `json:"max_children,omitempty" jsonschema:"Max children per parent row (default 100)."`
 	MaxRows      int      `json:"max_rows,omitempty" jsonschema:"Maximum rows per table safeguard (default 10000000)."`
 	DeferIndexes bool     `json:"defer_indexes,omitempty" jsonschema:"Drop secondary indexes before seeding and rebuild after (faster for large tables)."`
-	ConfigPath   string   `json:"config_path,omitempty" jsonschema:"Path to a go-seed-my-db.yaml config file for custom column generators and references."`
+	ConfigPath   string   `json:"config_path,omitempty" jsonschema:"Path to a go-test-my-db.yaml config file for custom column generators and references."`
 }
 
 func registerSeedDatabase(s *mcp.Server) {

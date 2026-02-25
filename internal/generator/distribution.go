@@ -6,7 +6,7 @@ import (
 	"math/rand/v2"
 	"sort"
 
-	"github.com/tomfevang/go-seed-my-db/internal/config"
+	"github.com/tomfevang/go-test-my-db/internal/config"
 )
 
 // ValuePicker selects values from a slice using a configurable distribution.

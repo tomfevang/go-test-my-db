@@ -12,9 +12,9 @@ builds:
       - arm64
     ldflags:
       - -s -w
-      - -X github.com/tomfevang/go-seed-my-db/internal/version.version={{.Version}}
-      - -X github.com/tomfevang/go-seed-my-db/internal/version.commit={{.Commit}}
-      - -X github.com/tomfevang/go-seed-my-db/internal/version.date={{.Date}}
+      - -X github.com/tomfevang/go-test-my-db/internal/version.version={{.Version}}
+      - -X github.com/tomfevang/go-test-my-db/internal/version.commit={{.Commit}}
+      - -X github.com/tomfevang/go-test-my-db/internal/version.date={{.Date}}
 
 archives:
   - format_overrides:

@@ -3,7 +3,7 @@ package seeder
 import (
 	"testing"
 
-	"github.com/tomfevang/go-seed-my-db/internal/introspect"
+	"github.com/tomfevang/go-test-my-db/internal/introspect"
 )
 
 func TestDetectFKCorrelations_Basic(t *testing.T) {

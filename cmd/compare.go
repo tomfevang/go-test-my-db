@@ -14,8 +14,8 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
-	"github.com/tomfevang/go-seed-my-db/internal/config"
-	"github.com/tomfevang/go-seed-my-db/internal/ephemeral"
+	"github.com/tomfevang/go-test-my-db/internal/config"
+	"github.com/tomfevang/go-test-my-db/internal/ephemeral"
 )
 
 var (

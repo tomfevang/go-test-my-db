@@ -10,11 +10,11 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/spf13/cobra"
 
-	"github.com/tomfevang/go-seed-my-db/internal/config"
-	"github.com/tomfevang/go-seed-my-db/internal/depgraph"
-	"github.com/tomfevang/go-seed-my-db/internal/generator"
-	"github.com/tomfevang/go-seed-my-db/internal/introspect"
-	"github.com/tomfevang/go-seed-my-db/internal/seeder"
+	"github.com/tomfevang/go-test-my-db/internal/config"
+	"github.com/tomfevang/go-test-my-db/internal/depgraph"
+	"github.com/tomfevang/go-test-my-db/internal/generator"
+	"github.com/tomfevang/go-test-my-db/internal/introspect"
+	"github.com/tomfevang/go-test-my-db/internal/seeder"
 )
 
 var (
@@ -35,9 +35,9 @@ var (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "go-seed-my-db",
+	Use:   "go-test-my-db",
 	Short: "Seed MySQL databases with realistic fake data",
-	Long: `go-seed-my-db introspects your MySQL schema and generates millions of rows
+	Long: `go-test-my-db introspects your MySQL schema and generates millions of rows
 of realistic fake data based on column names and types. Perfect for
 performance testing with believable datasets.`,
 	RunE: runSeed,
@@ -50,7 +50,7 @@ func init() {
 	rootCmd.Flags().IntVar(&batchSize, "batch-size", 1000, "Rows per INSERT statement")
 	rootCmd.Flags().IntVar(&workers, "workers", 4, "Concurrent insert workers")
 	rootCmd.Flags().BoolVar(&clear, "clear", false, "Truncate target tables before seeding")
-	rootCmd.Flags().StringVar(&configPath, "config", "", "Path to config YAML file (default: auto-detect go-seed-my-db.yaml)")
+	rootCmd.Flags().StringVar(&configPath, "config", "", "Path to config YAML file (default: auto-detect go-test-my-db.yaml)")
 	rootCmd.Flags().BoolVar(&loadData, "load-data", false, "Use LOAD DATA LOCAL INFILE for faster bulk loading (requires server local_infile=ON)")
 	rootCmd.Flags().IntVar(&minChildren, "min-children", 10, "Min children per parent row for child tables")
 	rootCmd.Flags().IntVar(&maxChildren, "max-children", 100, "Max children per parent row for child tables")

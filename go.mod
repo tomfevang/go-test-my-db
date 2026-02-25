@@ -1,4 +1,4 @@
-module github.com/tomfevang/go-seed-my-db
+module github.com/tomfevang/go-test-my-db
 
 go 1.25.7
 

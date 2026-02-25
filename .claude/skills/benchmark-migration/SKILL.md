@@ -2,7 +2,7 @@
 name: benchmark-migration
 description: >
   Benchmark a database migration. Parses a Java migration (DatabaseUtil.createTable DSL),
-  converts it to DDL, generates a go-seed-my-db config, seeds realistic data, and runs
+  converts it to DDL, generates a go-test-my-db config, seeds realistic data, and runs
   query benchmarks. Use when the user wants to test index performance on a new or modified table.
 ---
 
@@ -119,7 +119,7 @@ Ask the user:
 
 ## Step 4 — Generate the config
 
-Create a `go-seed-my-db.yaml` config file with:
+Create a `go-test-my-db.yaml` config file with:
 
 ```yaml
 options:
@@ -198,13 +198,13 @@ working directory.
 
 ## Step 5 — Run the benchmark
 
-Use the `seed-my-db` MCP **`test`** tool to run the benchmark for a single schema:
+Use the `test-my-db` MCP **`test`** tool to run the benchmark for a single schema:
 
 ```
 MCP tool: test(config_path: "<config.yaml>")
 ```
 
-Or via CLI: `go-seed-my-db test --config <config.yaml> --ephemeral`
+Or via CLI: `go-test-my-db test --config <config.yaml> --ephemeral`
 
 ## Step 6 — Analyze and suggest improvements
 
@@ -250,4 +250,4 @@ tests:
 ```
 
 4. Run via MCP: `compare(config_path: "comparison.yaml")`
-   Or via CLI: `go-seed-my-db compare comparison.yaml --ephemeral`
+   Or via CLI: `go-test-my-db compare comparison.yaml --ephemeral`

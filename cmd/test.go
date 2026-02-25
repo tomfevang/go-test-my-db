@@ -17,9 +17,9 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
-	"github.com/tomfevang/go-seed-my-db/internal/config"
-	"github.com/tomfevang/go-seed-my-db/internal/ephemeral"
-	"github.com/tomfevang/go-seed-my-db/internal/generator"
+	"github.com/tomfevang/go-test-my-db/internal/config"
+	"github.com/tomfevang/go-test-my-db/internal/ephemeral"
+	"github.com/tomfevang/go-test-my-db/internal/generator"
 )
 
 const (
@@ -59,7 +59,7 @@ test queries, drop the tables, and report results.`,
 func init() {
 	testCmd.Flags().StringVar(&testDSN, "dsn", "", "MySQL DSN (required), e.g. user:pass@tcp(localhost:3306)/mydb")
 	testCmd.Flags().StringVar(&testSchemaFile, "schema", "", "Path to SQL DDL file (required)")
-	testCmd.Flags().StringVar(&testConfigPath, "config", "", "Path to config YAML file (default: auto-detect go-seed-my-db.yaml)")
+	testCmd.Flags().StringVar(&testConfigPath, "config", "", "Path to config YAML file (default: auto-detect go-test-my-db.yaml)")
 	testCmd.Flags().IntVar(&testRows, "rows", 1000, "Number of rows per table")
 	testCmd.Flags().IntVar(&testBatchSize, "batch-size", 1000, "Rows per INSERT statement")
 	testCmd.Flags().IntVar(&testWorkers, "workers", 4, "Concurrent insert workers")

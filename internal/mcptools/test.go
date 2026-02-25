@@ -8,7 +8,7 @@ import (
 )
 
 type testArgs struct {
-	ConfigPath string `json:"config_path" jsonschema:"Path to a go-seed-my-db.yaml config file. Must have options.schema pointing to a DDL file and a tests section with benchmark queries."`
+	ConfigPath string `json:"config_path" jsonschema:"Path to a go-test-my-db.yaml config file. Must have options.schema pointing to a DDL file and a tests section with benchmark queries."`
 	Rows       int    `json:"rows,omitempty" jsonschema:"Override rows per table (0 = use config value or default 1000)."`
 	BatchSize  int    `json:"batch_size,omitempty" jsonschema:"Rows per INSERT statement (0 = use config value or default 1000)."`
 	Workers    int    `json:"workers,omitempty" jsonschema:"Concurrent insert workers (0 = use config value or default 4)."`

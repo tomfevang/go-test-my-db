@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/tomfevang/go-seed-my-db/cmd"
+	"github.com/tomfevang/go-test-my-db/cmd"
 )
 
 func main() {

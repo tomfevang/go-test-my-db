@@ -8,8 +8,8 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/spf13/cobra"
 
-	"github.com/tomfevang/go-seed-my-db/internal/mcptools"
-	"github.com/tomfevang/go-seed-my-db/internal/version"
+	"github.com/tomfevang/go-test-my-db/internal/mcptools"
+	"github.com/tomfevang/go-test-my-db/internal/version"
 )
 
 // SkillsFS holds the embedded skills directory, set by main before Execute().
@@ -25,8 +25,8 @@ introspect schemas, preview data, seed databases, and compare performance.
 Configure in .claude/settings.json:
 
   "mcpServers": {
-    "seed-my-db": {
-      "command": "go-seed-my-db",
+    "test-my-db": {
+      "command": "go-test-my-db",
       "args": ["mcp"],
       "env": { "SEED_DSN": "user:pass@tcp(localhost:3306)/mydb" }
     }
@@ -38,7 +38,7 @@ func init() {
 	rootCmd.AddCommand(mcpCmd)
 }
 
-const mcpInstructions = `go-seed-my-db seeds MySQL databases with realistic fake data for performance testing.
+const mcpInstructions = `go-test-my-db seeds MySQL databases with realistic fake data for performance testing.
 
 ## Connection
 
@@ -49,7 +49,7 @@ The MySQL DSN can be pre-configured via the SEED_DSN environment variable. If SE
 1. **list_tables** → see what tables exist and their FK relationships
 2. **describe_table** → inspect column types, indexes, and constraints for a specific table
 3. **preview_data** → dry-run: see sample rows the seeder would generate (no writes)
-4. **generate_config** → scaffold a go-seed-my-db.yaml config from the live schema
+4. **generate_config** → scaffold a go-test-my-db.yaml config from the live schema
 5. **seed_database** → insert fake data into the database
 6. **test** → benchmark query performance for a single schema config
 7. **compare** → benchmark and compare query performance across multiple schema configs side-by-side
@@ -69,7 +69,7 @@ To use a skill, read the resource and follow its instructions.`
 func runMCP(_ *cobra.Command, _ []string) error {
 	server := mcp.NewServer(
 		&mcp.Implementation{
-			Name:    "go-seed-my-db",
+			Name:    "go-test-my-db",
 			Version: version.Version(),
 		},
 		&mcp.ServerOptions{
