@@ -2,6 +2,30 @@
 
 A MySQL testing toolkit that introspects your schema, generates millions of rows of realistic fake data, benchmarks queries, and compares schema designs side by side.
 
+## Table of contents
+
+- [Features](#features)
+- [Installation](#installation)
+- [Quick start](#quick-start)
+- [Commands](#commands)
+  - [seed](#go-test-my-db-seed)
+  - [init](#go-test-my-db-init)
+  - [test](#go-test-my-db-test)
+  - [compare](#go-test-my-db-compare)
+  - [preview](#go-test-my-db-preview)
+  - [examples](#go-test-my-db-examples)
+- [MCP server](#mcp-server)
+  - [Setup](#setup)
+  - [Available tools](#available-tools)
+  - [Typical workflow](#typical-workflow)
+  - [Skills](#skills)
+- [Config file](#config-file)
+  - [Value distributions](#value-distributions)
+  - [Correlated column groups](#correlated-column-groups)
+- [Examples](#examples)
+- [Contributing](#contributing)
+- [License](#license)
+
 ## Features
 
 - **Schema introspection** — discovers tables, columns, types, foreign keys, unique indexes, and enums
