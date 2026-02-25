@@ -227,6 +227,54 @@ This writes an `examples/` directory containing two schema designs (generated-co
 |---|---|---|
 | `--force` | false | Overwrite existing files |
 
+## MCP server
+
+go-test-my-db includes a built-in [Model Context Protocol](https://modelcontextprotocol.io/) server, letting AI tools like Claude Code interact with your database directly — introspect schemas, generate configs, seed data, and benchmark queries through natural conversation.
+
+### Setup
+
+Add to your Claude Code project settings (`.claude/settings.json`):
+
+```json
+{
+  "mcpServers": {
+    "seed-my-db": {
+      "command": "go-test-my-db",
+      "args": ["mcp"],
+      "env": { "SEED_DSN": "user:pass@tcp(localhost:3306)/mydb" }
+    }
+  }
+}
+```
+
+If `SEED_DSN` is not set and Docker or Podman is available, the `test` and `compare` tools automatically start an ephemeral MySQL container — no configuration needed.
+
+### Available tools
+
+| Tool | Description |
+|---|---|
+| `list_tables` | List all tables and their FK relationships |
+| `describe_table` | Inspect column types, indexes, and constraints for a table |
+| `preview_data` | Dry-run: see sample rows the seeder would generate (no writes) |
+| `generate_config` | Scaffold a `go-test-my-db.yaml` from the live schema |
+| `seed_database` | Insert fake data into the database |
+| `test` | Benchmark query performance for a single schema config |
+| `compare` | Benchmark and compare query performance across multiple schemas side by side |
+
+### Typical workflow
+
+```
+list_tables → describe_table → preview_data → generate_config → seed_database → test / compare
+```
+
+Start with `list_tables` to orient yourself, then drill into individual tables. Use `preview_data` to validate generation strategies before committing to a full seed. Use `test` when benchmarking one schema, and `compare` when evaluating alternatives (e.g., different index strategies).
+
+### Skills
+
+The MCP server exposes skill resources that guide you through complex workflows:
+
+- **benchmark-migration** — Parse a Java migration file, convert to DDL, generate a seed config, and benchmark query performance. Invoke with `/benchmark-migration` in Claude Code.
+
 ## Config file
 
 Place a `go-test-my-db.yaml` in your working directory or pass `--config`. Use `go-test-my-db init` to generate one from your schema.
