@@ -12,46 +12,44 @@ import (
 	"github.com/tomfevang/go-seed-my-db/internal/introspect"
 )
 
-type listTablesArgs struct {
-	DSN string `json:"dsn,omitempty" jsonschema:"MySQL DSN (e.g. user:pass@tcp(localhost:3306)/mydb). Falls back to SEED_DSN env var if omitted."`
-}
+type listTablesArgs struct{}
 
 func registerListTables(s *mcp.Server) {
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "list_tables",
-		Description: "List all tables in a MySQL database schema with their foreign key relationships.",
+		Description: "List all tables in the connected MySQL database with their foreign key relationships. Takes no arguments — the connection is configured via the SEED_DSN environment variable.",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
 	}, handleListTables)
 }
 
-func handleListTables(_ context.Context, _ *mcp.CallToolRequest, args listTablesArgs) (*mcp.CallToolResult, struct{}, error) {
-	dsn := resolveDSN(args.DSN)
+func handleListTables(_ context.Context, _ *mcp.CallToolRequest, args listTablesArgs) (*mcp.CallToolResult, any, error) {
+	dsn := resolveDSN()
 	if dsn == "" {
-		return errResult("DSN is required: pass it as a parameter or set the SEED_DSN environment variable"), struct{}{}, nil
+		return errResult("SEED_DSN environment variable is not set"), nil, nil
 	}
 
 	schema := extractSchema(dsn)
 	if schema == "" {
-		return errResult("could not extract database name from DSN"), struct{}{}, nil
+		return errResult("could not extract database name from DSN"), nil, nil
 	}
 
 	db, err := sql.Open("mysql", dsn)
 	if err != nil {
-		return errResult(fmt.Sprintf("connecting to MySQL: %v", err)), struct{}{}, nil
+		return errResult(fmt.Sprintf("connecting to MySQL: %v", err)), nil, nil
 	}
 	defer db.Close()
 
 	if err := db.Ping(); err != nil {
-		return errResult(fmt.Sprintf("pinging MySQL: %v", err)), struct{}{}, nil
+		return errResult(fmt.Sprintf("pinging MySQL: %v", err)), nil, nil
 	}
 
 	tableNames, err := introspect.ListTables(db, schema)
 	if err != nil {
-		return errResult(fmt.Sprintf("listing tables: %v", err)), struct{}{}, nil
+		return errResult(fmt.Sprintf("listing tables: %v", err)), nil, nil
 	}
 
 	if len(tableNames) == 0 {
-		return textResult(fmt.Sprintf("No tables found in schema %s", schema)), struct{}{}, nil
+		return textResult(fmt.Sprintf("No tables found in schema %s", schema)), nil, nil
 	}
 
 	// Introspect each table to show FK relationships.
@@ -76,5 +74,5 @@ func handleListTables(_ context.Context, _ *mcp.CallToolRequest, args listTables
 		}
 	}
 
-	return textResult(sb.String()), struct{}{}, nil
+	return textResult(sb.String()), nil, nil
 }

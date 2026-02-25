@@ -8,8 +8,7 @@ import (
 )
 
 type seedDatabaseArgs struct {
-	DSN          string   `json:"dsn,omitempty" jsonschema:"MySQL DSN. Falls back to SEED_DSN env var if omitted."`
-	Tables       []string `json:"tables,omitempty" jsonschema:"Tables to seed. If omitted seeds all tables."`
+	Tables       []string `json:"tables,omitempty" jsonschema:"Tables to seed. If omitted, seeds all tables in FK-safe order."`
 	Rows         int      `json:"rows,omitempty" jsonschema:"Base row count per root table (default 1000)."`
 	BatchSize    int      `json:"batch_size,omitempty" jsonschema:"Rows per INSERT statement (default 1000)."`
 	Workers      int      `json:"workers,omitempty" jsonschema:"Concurrent insert workers (default 4)."`
@@ -17,23 +16,21 @@ type seedDatabaseArgs struct {
 	MinChildren  int      `json:"min_children,omitempty" jsonschema:"Min children per parent row (default 10)."`
 	MaxChildren  int      `json:"max_children,omitempty" jsonschema:"Max children per parent row (default 100)."`
 	MaxRows      int      `json:"max_rows,omitempty" jsonschema:"Maximum rows per table safeguard (default 10000000)."`
-	DeferIndexes bool     `json:"defer_indexes,omitempty" jsonschema:"Drop secondary indexes before seeding and rebuild after."`
-	ConfigPath   string   `json:"config_path,omitempty" jsonschema:"Path to a go-seed-my-db.yaml config file."`
+	DeferIndexes bool     `json:"defer_indexes,omitempty" jsonschema:"Drop secondary indexes before seeding and rebuild after (faster for large tables)."`
+	ConfigPath   string   `json:"config_path,omitempty" jsonschema:"Path to a go-seed-my-db.yaml config file for custom column generators and references."`
 }
 
 func registerSeedDatabase(s *mcp.Server) {
 	mcp.AddTool(s, &mcp.Tool{
-		Name: "seed_database",
-		Description: `Seed MySQL tables with realistic fake data. Introspects the schema,
-resolves FK dependencies, and inserts data in topological order.
-Use list_tables and describe_table first to understand the schema.`,
+		Name:        "seed_database",
+		Description: "Insert realistic fake data into MySQL tables. Automatically introspects the schema, resolves FK dependencies, and seeds tables in topological order. Call with no arguments to seed all tables with 1000 rows each using auto-detected column heuristics.",
 	}, handleSeedDatabase)
 }
 
-func handleSeedDatabase(ctx context.Context, _ *mcp.CallToolRequest, args seedDatabaseArgs) (*mcp.CallToolResult, struct{}, error) {
-	dsn := resolveDSN(args.DSN)
+func handleSeedDatabase(ctx context.Context, _ *mcp.CallToolRequest, args seedDatabaseArgs) (*mcp.CallToolResult, any, error) {
+	dsn := resolveDSN()
 	if dsn == "" {
-		return errResult("DSN is required: pass it as a parameter or set the SEED_DSN environment variable"), struct{}{}, nil
+		return errResult("SEED_DSN environment variable is not set"), nil, nil
 	}
 
 	// Build CLI args.
@@ -72,8 +69,8 @@ func handleSeedDatabase(ctx context.Context, _ *mcp.CallToolRequest, args seedDa
 
 	output, err := runSelf(ctx, cliArgs...)
 	if err != nil {
-		return errResult("seeding failed: " + err.Error()), struct{}{}, nil
+		return errResult("seeding failed: " + err.Error()), nil, nil
 	}
 
-	return textResult(output), struct{}{}, nil
+	return textResult(output), nil, nil
 }

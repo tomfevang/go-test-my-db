@@ -13,58 +13,56 @@ import (
 	"github.com/tomfevang/go-seed-my-db/internal/introspect"
 )
 
-type generateConfigArgs struct {
-	DSN string `json:"dsn,omitempty" jsonschema:"MySQL DSN. Falls back to SEED_DSN env var if omitted."`
-}
+type generateConfigArgs struct{}
 
 func registerGenerateConfig(s *mcp.Server) {
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "generate_config",
-		Description: "Generate a go-seed-my-db.yaml config by introspecting the database schema. Returns the YAML content as text (does not write to disk).",
+		Description: "Scaffold a go-seed-my-db.yaml config file by introspecting the live database schema. Returns YAML content as text — does not write to disk. The output includes heuristic column generators, FK references, and commented-out test queries as a starting point.",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
 	}, handleGenerateConfig)
 }
 
-func handleGenerateConfig(_ context.Context, _ *mcp.CallToolRequest, args generateConfigArgs) (*mcp.CallToolResult, struct{}, error) {
-	dsn := resolveDSN(args.DSN)
+func handleGenerateConfig(_ context.Context, _ *mcp.CallToolRequest, args generateConfigArgs) (*mcp.CallToolResult, any, error) {
+	dsn := resolveDSN()
 	if dsn == "" {
-		return errResult("DSN is required"), struct{}{}, nil
+		return errResult("SEED_DSN environment variable is not set"), nil, nil
 	}
 
 	schema := extractSchema(dsn)
 	if schema == "" {
-		return errResult("could not extract database name from DSN"), struct{}{}, nil
+		return errResult("could not extract database name from DSN"), nil, nil
 	}
 
 	db, err := sql.Open("mysql", dsn)
 	if err != nil {
-		return errResult(fmt.Sprintf("connecting: %v", err)), struct{}{}, nil
+		return errResult(fmt.Sprintf("connecting: %v", err)), nil, nil
 	}
 	defer db.Close()
 
 	if err := db.Ping(); err != nil {
-		return errResult(fmt.Sprintf("pinging: %v", err)), struct{}{}, nil
+		return errResult(fmt.Sprintf("pinging: %v", err)), nil, nil
 	}
 
 	tableNames, err := introspect.ListTables(db, schema)
 	if err != nil {
-		return errResult(fmt.Sprintf("listing tables: %v", err)), struct{}{}, nil
+		return errResult(fmt.Sprintf("listing tables: %v", err)), nil, nil
 	}
 	if len(tableNames) == 0 {
-		return errResult(fmt.Sprintf("no tables found in schema %s", schema)), struct{}{}, nil
+		return errResult(fmt.Sprintf("no tables found in schema %s", schema)), nil, nil
 	}
 
 	tables := make([]*introspect.Table, 0, len(tableNames))
 	for _, name := range tableNames {
 		t, err := introspect.IntrospectTable(db, schema, name)
 		if err != nil {
-			return errResult(fmt.Sprintf("introspecting %s: %v", name, err)), struct{}{}, nil
+			return errResult(fmt.Sprintf("introspecting %s: %v", name, err)), nil, nil
 		}
 		tables = append(tables, t)
 	}
 
 	yaml := buildInitYAML(dsn, tables)
-	return textResult(yaml), struct{}{}, nil
+	return textResult(yaml), nil, nil
 }
 
 // buildInitYAML generates a starter go-seed-my-db.yaml from introspected tables.

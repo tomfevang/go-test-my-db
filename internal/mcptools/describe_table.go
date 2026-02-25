@@ -13,45 +13,44 @@ import (
 )
 
 type describeTableArgs struct {
-	DSN   string `json:"dsn,omitempty" jsonschema:"MySQL DSN. Falls back to SEED_DSN env var if omitted."`
-	Table string `json:"table" jsonschema:"Name of the table to describe"`
+	Table string `json:"table" jsonschema:"Name of the table to describe."`
 }
 
 func registerDescribeTable(s *mcp.Server) {
 	mcp.AddTool(s, &mcp.Tool{
 		Name:        "describe_table",
-		Description: "Get detailed column metadata, types, foreign keys, and unique indexes for a MySQL table.",
+		Description: "Show detailed column metadata for a single table: data types, nullability, primary keys, auto-increment, foreign keys, generated columns, and unique indexes.",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
 	}, handleDescribeTable)
 }
 
-func handleDescribeTable(_ context.Context, _ *mcp.CallToolRequest, args describeTableArgs) (*mcp.CallToolResult, struct{}, error) {
-	dsn := resolveDSN(args.DSN)
+func handleDescribeTable(_ context.Context, _ *mcp.CallToolRequest, args describeTableArgs) (*mcp.CallToolResult, any, error) {
+	dsn := resolveDSN()
 	if dsn == "" {
-		return errResult("DSN is required"), struct{}{}, nil
+		return errResult("SEED_DSN environment variable is not set"), nil, nil
 	}
 	if args.Table == "" {
-		return errResult("table name is required"), struct{}{}, nil
+		return errResult("table name is required"), nil, nil
 	}
 
 	schema := extractSchema(dsn)
 	if schema == "" {
-		return errResult("could not extract database name from DSN"), struct{}{}, nil
+		return errResult("could not extract database name from DSN"), nil, nil
 	}
 
 	db, err := sql.Open("mysql", dsn)
 	if err != nil {
-		return errResult(fmt.Sprintf("connecting to MySQL: %v", err)), struct{}{}, nil
+		return errResult(fmt.Sprintf("connecting to MySQL: %v", err)), nil, nil
 	}
 	defer db.Close()
 
 	if err := db.Ping(); err != nil {
-		return errResult(fmt.Sprintf("pinging MySQL: %v", err)), struct{}{}, nil
+		return errResult(fmt.Sprintf("pinging MySQL: %v", err)), nil, nil
 	}
 
 	table, err := introspect.IntrospectTable(db, schema, args.Table)
 	if err != nil {
-		return errResult(fmt.Sprintf("introspecting table: %v", err)), struct{}{}, nil
+		return errResult(fmt.Sprintf("introspecting table: %v", err)), nil, nil
 	}
 
 	var sb strings.Builder
@@ -103,5 +102,5 @@ func handleDescribeTable(_ context.Context, _ *mcp.CallToolRequest, args describ
 		}
 	}
 
-	return textResult(sb.String()), struct{}{}, nil
+	return textResult(sb.String()), nil, nil
 }

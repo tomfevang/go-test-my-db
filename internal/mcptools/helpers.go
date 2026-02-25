@@ -15,11 +15,8 @@ import (
 	"github.com/tomfevang/go-seed-my-db/internal/depgraph"
 )
 
-// resolveDSN returns the DSN from the argument or falls back to the SEED_DSN env var.
-func resolveDSN(argDSN string) string {
-	if argDSN != "" {
-		return argDSN
-	}
+// resolveDSN returns the DSN from the SEED_DSN environment variable.
+func resolveDSN() string {
 	return os.Getenv("SEED_DSN")
 }
 
